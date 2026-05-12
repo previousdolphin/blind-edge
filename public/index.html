@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Local-first, end-to-end encrypted messaging">
-  <title>Blind-Edge</title>
+  <title>B.E.Chat — Blind-Edge Messenger</title>
 
   <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1120,7 +1120,7 @@
       <div id="auth-unlock">
         <div class="auth-card">
           <div class="auth-logo">
-            <img src="logo.svg" alt="BeChat" draggable="false">
+            <img src="logo.svg" alt="B.E.Chat" draggable="false">
           </div>
 
           <div class="feature-pills">
@@ -1228,7 +1228,7 @@
       <!-- App Header -->
       <header id="app-header">
         <button id="btn-back" class="hidden">← Back</button>
-        <span id="app-title">Blind-Edge</span>
+        <span id="app-title">B.E.Chat</span>
         <div class="header-actions">
           <button id="btn-ttl" class="hidden" title="Message autodestruct">Timer</button>
           <button id="btn-identity" title="Your Identity">Key</button>
@@ -1375,18 +1375,18 @@
     <div id="modal-about" class="modal hidden" role="dialog" aria-modal="true">
       <div class="modal-box about-box">
 
-        <img src="logo.svg" alt="BeChat" class="about-logo">
+        <img src="logo.svg" alt="B.E.Chat" class="about-logo">
 
         <div class="about-section">
           <div class="about-heading">The Blind Server</div>
-          <p>The relay server stores and forwards your messages as raw ciphertext. It cannot read them, has no concept of user accounts, and never sees your name, password, or contacts. Your "address" is the SHA-256 hash of your public key — a number, not an identity.</p>
+          <p>The relay stores and forwards your messages as raw ciphertext. It cannot read them, has no user accounts, and never sees your name, password, or contacts. Your "address" is the SHA-256 hash of your public key — a number, not an identity. The relay enforces a 24-hour server-side TTL and rate-limits writes per IP to resist flooding.</p>
         </div>
 
         <div class="about-section">
           <div class="about-heading">What the server sees</div>
           <table class="about-table">
             <tr><th>Field</th><th>Server receives</th><th>Meaning</th></tr>
-            <tr><td>Message</td><td>Hex ciphertext</td><td class="nothing">nothing</td></tr>
+            <tr><td>Message</td><td>Padded hex ciphertext</td><td class="nothing">nothing</td></tr>
             <tr><td>Sender</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
             <tr><td>Recipient</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
             <tr><td>Password</td><td>Never sent</td><td class="nothing">nothing</td></tr>
@@ -1396,12 +1396,12 @@
 
         <div class="about-section">
           <div class="about-heading">End-to-End Encryption</div>
-          <p>Messages are encrypted using <strong>ECDH P-256 + HKDF + AES-256-GCM</strong> before they leave your browser — using only the native Web Crypto API, no libraries. Only the intended recipient's private key can decrypt them.</p>
+          <p>Messages are encrypted using <strong>ECDH P-256 + HKDF + AES-256-GCM</strong> before they leave your browser — using only the native Web Crypto API, no libraries. All payloads are <strong>padded to 256-byte blocks</strong> before encryption so ciphertext length reveals nothing about message length. Only the intended recipient's private key can decrypt them.</p>
         </div>
 
         <div class="about-section">
           <div class="about-heading">Your Identity</div>
-          <p>A cryptographic keypair generated in your browser. Your private key is encrypted with your App Password via <strong>PBKDF2 (600,000 rounds)</strong> and stored locally. It never leaves your device. Export it only when moving to a new device, then delete the file immediately.</p>
+          <p>A cryptographic keypair generated in your browser. Your private key is encrypted with your App Password via <strong>PBKDF2 (600,000 rounds)</strong> and stored locally — it never leaves your device. Your <strong>identicon</strong> (the pixel pattern next to your key) is a visual fingerprint derived from your public key, making out-of-band verification faster than comparing raw hex strings. Export only when moving to a new device, then delete the file immediately.</p>
         </div>
 
         <div class="about-section">
@@ -1417,7 +1417,7 @@
 
         <div class="about-section">
           <div class="about-heading">Message Autodestruct</div>
-          <p>In any conversation, tap <strong>Timer</strong> to set a local expiry (1h – 7d). Messages older than that threshold are deleted from your device on every app load. Tell your contact your setting — their copy is independent.</p>
+          <p>In any conversation, tap <strong>Timer</strong> to set a local expiry (1h – 7d). Messages older than that threshold are deleted from your device on every app load. The relay independently prunes all envelopes after 24 hours server-side. Tell your contact your local setting — their copy is independent.</p>
         </div>
 
         <div class="modal-actions">

@@ -1,7 +1,7 @@
 {
-  "name": "Blind-Edge Messenger",
-  "short_name": "Blind-Edge",
-  "description": "Local-first, end-to-end encrypted messaging",
+  "name": "B.E.Chat — Blind-Edge Messenger",
+  "short_name": "B.E.Chat",
+  "description": "End-to-end encrypted, local-first messaging with a zero-knowledge relay. No accounts, no plaintext on the wire.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
