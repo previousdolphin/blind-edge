@@ -1,3 +1,30 @@
+// In-memory rate limiter (per isolate instance — provides friction, not a hard guarantee)
+const BUCKETS = new Map(); // IP → { sends: number, syncs: number, resetAt: number }
+const SEND_LIMIT = 30;
+const SYNC_LIMIT = 180;
+const WINDOW_MS = 60_000;
+
+function checkRate(ip, type) {
+  const now = Date.now();
+  let b = BUCKETS.get(ip);
+  if (!b || now >= b.resetAt) {
+    b = { sends: 0, syncs: 0, resetAt: now + WINDOW_MS };
+    BUCKETS.set(ip, b);
+  }
+  if (type === 'send') {
+    if (b.sends >= SEND_LIMIT) return false;
+    b.sends++;
+  } else {
+    if (b.syncs >= SYNC_LIMIT) return false;
+    b.syncs++;
+  }
+  // Prune stale entries occasionally
+  if (BUCKETS.size > 5000) {
+    for (const [k, v] of BUCKETS) if (now >= v.resetAt) BUCKETS.delete(k);
+  }
+  return true;
+}
+
 function getCorsHeaders(request, env) {
   const origin = request.headers.get('Origin') || '';
   const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim());
@@ -30,6 +57,11 @@ function json(data, status = 200, extraHeaders = {}) {
 }
 
 async function handleSend(request, env, corsHeaders) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRate(ip, 'send')) {
+    return json({ error: 'Rate limit exceeded' }, 429, corsHeaders);
+  }
+
   let body;
   try {
     body = await request.json();
@@ -59,6 +91,11 @@ async function handleSend(request, env, corsHeaders) {
 }
 
 async function handleSync(request, env, corsHeaders) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRate(ip, 'sync')) {
+    return json({ error: 'Rate limit exceeded' }, 429, corsHeaders);
+  }
+
   const url = new URL(request.url);
   const forHash = url.searchParams.get('for');
   const sinceRaw = url.searchParams.get('since') ?? '0';
@@ -109,5 +146,11 @@ export default {
     } catch (err) {
       return json({ error: 'Internal server error' }, 500, corsHeaders);
     }
+  },
+
+  // Cron trigger: prune envelopes older than 24 hours every 6 hours
+  async scheduled(event, env, ctx) {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    await env.DB.prepare('DELETE FROM envelopes WHERE created_at < ?').bind(cutoff).run();
   },
 };

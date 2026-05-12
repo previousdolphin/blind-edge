@@ -28,7 +28,7 @@ export class SecurityManager {
     );
 
     return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 210_000 },
+      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000 },
       rawKey,
       { name: 'AES-GCM', length: 256 },
       false,
@@ -99,10 +99,20 @@ export class SecurityManager {
   static async encryptMessage(plaintext, recipientPubKey, senderPrivKey) {
     const aesKey = await SecurityManager._deriveSharedAesKey(recipientPubKey, senderPrivKey);
     const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    // Pad to next 256-byte boundary to defeat traffic-length analysis.
+    // Format: [4-byte LE message length][message bytes][random padding]
+    const msgBytes = new TextEncoder().encode(plaintext);
+    const msgLen = msgBytes.length;
+    const padded = new Uint8Array(4 + Math.ceil((msgLen + 4) / 256) * 256);
+    new DataView(padded.buffer).setUint32(0, msgLen, true);
+    padded.set(msgBytes, 4);
+    crypto.getRandomValues(padded.subarray(4 + msgLen));
+
     const ciphertextBuf = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       aesKey,
-      new TextEncoder().encode(plaintext)
+      padded
     );
 
     return {
@@ -120,7 +130,10 @@ export class SecurityManager {
         aesKey,
         hexToBytes(ciphertext)
       );
-      return new TextDecoder().decode(plaintextBuf);
+      // Unpad: read 4-byte LE length prefix, extract that many bytes
+      const padded = new Uint8Array(plaintextBuf);
+      const msgLen = new DataView(padded.buffer).getUint32(0, true);
+      return new TextDecoder().decode(padded.subarray(4, 4 + msgLen));
     } catch {
       throw new Error('Decryption failed — wrong key or corrupted data');
     }

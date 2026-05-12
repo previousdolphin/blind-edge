@@ -10,6 +10,31 @@ function hexToBytes(hex) {
   return bytes;
 }
 
+// Deterministic 5×5 symmetric identicon from any hex string (pubKeyHex or keyHash)
+function generateIdenticon(hex, size = 40) {
+  const bytes = [];
+  for (let i = 2; i < Math.min(hex.length, 66); i += 2) {
+    bytes.push(parseInt(hex.slice(i, i + 2), 16));
+  }
+  while (bytes.length < 18) bytes.push(0);
+  const hue = Math.round((bytes[0] / 255) * 360);
+  const sat = 50 + Math.round((bytes[1] / 255) * 40);
+  const lit = 40 + Math.round((bytes[2] / 255) * 25);
+  const color = `hsl(${hue},${sat}%,${lit}%)`;
+  const cell = size / 5;
+  const rects = [`<rect width="${size}" height="${size}" fill="#111" rx="4"/>`];
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      if (bytes[3 + row * 3 + col] & 1) {
+        const y = row * cell;
+        rects.push(`<rect x="${col * cell}" y="${y}" width="${cell}" height="${cell}" fill="${color}"/>`);
+        if (col < 2) rects.push(`<rect x="${(4 - col) * cell}" y="${y}" width="${cell}" height="${cell}" fill="${color}"/>`);
+      }
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${rects.join('')}</svg>`;
+}
+
 const state = {
   masterKey: null,
   keypair: null,
@@ -191,7 +216,7 @@ function renderContactList() {
   empty.classList.add('hidden');
   list.innerHTML = state.contacts.map(c => `
     <div class="contact-item" data-id="${c.id}">
-      <div class="contact-avatar">${esc(c.name[0])}</div>
+      <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
       <div class="contact-info">
         <div class="contact-name">${esc(c.name)}</div>
         <div class="contact-last-msg">${c.lastMessage ? esc(c.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
@@ -421,6 +446,7 @@ function closeModal(id) { $id(id).classList.add('hidden'); }
 function openIdentityModal() {
   $id('identity-pubkey').textContent = state.pubKeyHex;
   $id('identity-hash').textContent = state.keyHash;
+  $id('identity-identicon').innerHTML = generateIdenticon(state.keyHash || state.pubKeyHex, 72);
   openModal('modal-identity');
 }
 
