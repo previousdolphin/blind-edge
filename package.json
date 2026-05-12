@@ -2,8 +2,10 @@
   "name": "blind-edge",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "npx serve public -p 8080",
+    "test": "node --test test/*.test.mjs",
     "db:create": "cd worker && npx wrangler d1 create blind-edge-db",
     "db:init": "cd worker && npx wrangler d1 execute blind-edge-db --file=schema.sql",
     "worker:dev": "cd worker && npx wrangler dev",

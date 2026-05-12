@@ -89,9 +89,11 @@ The app ships pre-configured with a shared demo relay:
 
 1. Open [blind-edge.pages.dev](https://blind-edge.pages.dev)
 2. Create an identity (or import one)
-3. Tap **Key** → copy your public key → share it with your contact out-of-band
-4. Have them share theirs → tap **+ Add** to add them as a contact
+3. Tap **Key** → **Copy Key** — your key is two P-256 public keys joined by a colon (`ecdhKey:signingKey`). Share this string out-of-band with your contact (Signal, in person, etc.)
+4. Have them share their key string → tap **+ Add**, paste it, give them a name
 5. Start messaging
+
+> **Key format note:** The combined key string is ~262 characters (`130 hex + : + 130 hex`). Both parties need to share the full string for signature verification. Contacts added with only an ECDH key (130 chars, no colon) work in legacy mode — messages are encrypted but not signed.
 
 The demo relay is operational but **shared** — use your own Worker for private production use.
 

@@ -1,17 +1,4 @@
-function hexToBytes(hex) {
-  if (hex.length % 2 !== 0) throw new Error('Invalid hex string length');
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-function bytesToHex(bytes) {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+import { hexToBytes, bytesToHex } from './hex.js';
 
 function idbOpen() {
   return new Promise((resolve, reject) => {
@@ -94,6 +81,56 @@ export class StorageManager {
       this._db.run('ALTER TABLE contacts ADD COLUMN ttl_seconds INTEGER');
     } catch (_) {}
 
+    // Per-contact monotonic message counters for replay protection.
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN last_sent_counter INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN last_received_counter INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+
+    // ECDSA signing public key per contact (added with ephemeral-key envelopes).
+    // Contacts added before this migration have no signing key on file; mark
+    // them legacy so the receive path can skip signature verification with
+    // a clear UI indication.
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN sign_pub_key_hex TEXT');
+    } catch (_) {}
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+    this._db.run('UPDATE contacts SET legacy = 1 WHERE sign_pub_key_hex IS NULL AND legacy = 0');
+
+    await this._persist();
+  }
+
+  async getCounters(contactId) {
+    const rows = this._query(
+      'SELECT last_sent_counter as sent, last_received_counter as received FROM contacts WHERE id = ?',
+      [contactId]
+    );
+    if (!rows.length) return { sent: 0, received: 0 };
+    return { sent: rows[0].sent || 0, received: rows[0].received || 0 };
+  }
+
+  async incrementSentCounter(contactId) {
+    this._db.run(
+      'UPDATE contacts SET last_sent_counter = last_sent_counter + 1 WHERE id = ?',
+      [contactId]
+    );
+    const rows = this._query(
+      'SELECT last_sent_counter as c FROM contacts WHERE id = ?',
+      [contactId]
+    );
+    await this._persist();
+    return rows[0].c;
+  }
+
+  async setReceivedCounter(contactId, counter) {
+    this._db.run(
+      'UPDATE contacts SET last_received_counter = ? WHERE id = ?',
+      [counter, contactId]
+    );
     await this._persist();
   }
 
@@ -104,10 +141,14 @@ export class StorageManager {
     return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
   }
 
-  async addContact(name, pubKeyHex) {
+  async addContact(name, pubKeyHex, signPubKeyHex) {
+    // signPubKeyHex may be null for legacy contacts shared with old-format
+    // (ECDH-only) keys; mark them legacy so the receive path skips signature
+    // verification.
+    const legacy = signPubKeyHex ? 0 : 1;
     this._db.run(
-      'INSERT INTO contacts (name, pub_key_hex) VALUES (?, ?)',
-      [name, pubKeyHex]
+      'INSERT INTO contacts (name, pub_key_hex, sign_pub_key_hex, legacy) VALUES (?, ?, ?, ?)',
+      [name, pubKeyHex, signPubKeyHex || null, legacy]
     );
     const id = this._db.exec('SELECT last_insert_rowid() as id')[0].values[0][0];
     this._db.run(
@@ -121,7 +162,11 @@ export class StorageManager {
   async getContacts() {
     return this._query(`
       SELECT
-        c.id, c.name, c.pub_key_hex as pubKeyHex, c.added_at as addedAt,
+        c.id, c.name,
+        c.pub_key_hex as pubKeyHex,
+        c.sign_pub_key_hex as signPubKeyHex,
+        c.legacy,
+        c.added_at as addedAt,
         (SELECT plaintext FROM messages WHERE contact_id = c.id ORDER BY ts DESC LIMIT 1) as lastMessage,
         (SELECT ts FROM messages WHERE contact_id = c.id ORDER BY ts DESC LIMIT 1) as lastTs,
         (SELECT COUNT(*) FROM messages WHERE contact_id = c.id AND status != 'read' AND direction = 'in') as unread

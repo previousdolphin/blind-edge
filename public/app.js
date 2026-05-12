@@ -1,13 +1,22 @@
 import { SecurityManager } from './crypto.js';
 import { StorageManager } from './storage.js';
+import { hexToBytes, bytesToHex } from './hex.js';
 
 // Shared demo relay — works out of the box; replace with your own in Settings
 const DEMO_WORKER_URL = 'https://blind-edge-api.jdo-8af.workers.dev';
 
-function hexToBytes(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
+// The Cloudflare Worker contract requires a 24-hex-char outer iv. With
+// per-message ephemeral keys the actual AES-GCM iv lives inside the encoded
+// inner envelope; we keep the outer iv as a constant placeholder so the worker
+// validator continues to pass without any server-side changes.
+const OUTER_IV_PLACEHOLDER = '0'.repeat(24);
+
+function encodeInnerEnvelope(envelope) {
+  return bytesToHex(new TextEncoder().encode(JSON.stringify(envelope)));
+}
+
+function decodeInnerEnvelope(hex) {
+  return JSON.parse(new TextDecoder().decode(hexToBytes(hex)));
 }
 
 // Deterministic 5×5 symmetric identicon from any hex string (pubKeyHex or keyHash)
@@ -37,8 +46,10 @@ function generateIdenticon(hex, size = 40) {
 
 const state = {
   masterKey: null,
-  keypair: null,
-  pubKeyHex: null,
+  ecdhKeypair: null,
+  signKeypair: null,
+  ecdhPubKeyHex: null,
+  signPubKeyHex: null,
   keyHash: null,
   storage: null,
   contacts: [],
@@ -105,8 +116,8 @@ async function doUnlock() {
     const parsed = JSON.parse(bundleStr);
     const salt = hexToBytes(parsed.salt);
     const masterKey = await SecurityManager.deriveKey(password, salt);
-    const { publicKey, privateKey } = await SecurityManager.importIdentityBundle(bundleStr, masterKey);
-    await bootApp({ publicKey, privateKey }, masterKey);
+    const identity = await SecurityManager.importIdentityBundle(bundleStr, masterKey);
+    await bootApp(identity, masterKey, salt);
     $id('unlock-password').value = '';
   } catch {
     showErr('unlock-error', 'Wrong password or corrupted identity.');
@@ -129,12 +140,13 @@ async function doCreate() {
   try {
     const salt = SecurityManager.generateSalt();
     const masterKey = await SecurityManager.deriveKey(password, salt);
-    const keypair = await SecurityManager.generateIdentity();
-    const bundle = await SecurityManager.exportIdentityBundle(keypair, masterKey, salt);
+    const ecdhKeypair = await SecurityManager.generateIdentity();
+    const signKeypair = await SecurityManager.generateSigningIdentity();
+    const bundle = await SecurityManager.exportIdentityBundle(ecdhKeypair, signKeypair, masterKey, salt);
     localStorage.setItem('blind-edge:identity', bundle);
     $id('setup-password').value = '';
     $id('setup-password-confirm').value = '';
-    await bootApp(keypair, masterKey);
+    await bootApp({ ecdh: ecdhKeypair, sign: signKeypair, migratedFromV1: false }, masterKey, salt);
   } catch (e) {
     showErr('setup-error', 'Identity generation failed: ' + e.message);
   } finally {
@@ -157,11 +169,11 @@ async function doImport() {
     const parsed = JSON.parse(jsonStr);
     const salt = hexToBytes(parsed.salt);
     const masterKey = await SecurityManager.deriveKey(password, salt);
-    const { publicKey, privateKey } = await SecurityManager.importIdentityBundle(jsonStr, masterKey);
+    const identity = await SecurityManager.importIdentityBundle(jsonStr, masterKey);
     localStorage.setItem('blind-edge:identity', jsonStr);
     $id('import-password').value = '';
     $id('import-json').value = '';
-    await bootApp({ publicKey, privateKey }, masterKey);
+    await bootApp(identity, masterKey, salt);
   } catch {
     showErr('import-error', 'Import failed — check password and JSON.');
   } finally {
@@ -171,11 +183,24 @@ async function doImport() {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
-async function bootApp(keypair, masterKey) {
-  state.keypair = keypair;
+async function bootApp(identity, masterKey, salt) {
+  state.ecdhKeypair = identity.ecdh;
+  state.signKeypair = identity.sign;
   state.masterKey = masterKey;
-  state.pubKeyHex = await SecurityManager.exportPublicKeyHex(keypair.publicKey);
-  state.keyHash = await SecurityManager.getKeyHash(keypair.publicKey);
+  state.ecdhPubKeyHex = await SecurityManager.exportPublicKeyHex(identity.ecdh.publicKey);
+  state.signPubKeyHex = await SecurityManager.exportSignPublicKeyHex(identity.sign.publicKey);
+  state.keyHash = await SecurityManager.getKeyHash(identity.ecdh.publicKey);
+
+  // v1 → v2 identity bundle migration: a fresh signing keypair was minted
+  // during import; persist the upgraded bundle so the user doesn't get a new
+  // signing key every unlock.
+  if (identity.migratedFromV1) {
+    const bundle = await SecurityManager.exportIdentityBundle(
+      identity.ecdh, identity.sign, masterKey, salt
+    );
+    localStorage.setItem('blind-edge:identity', bundle);
+    setTimeout(() => showToast('Identity upgraded to v2 (signing key added).', 'info'), 500);
+  }
 
   state.storage = new StorageManager();
   await state.storage.init();
@@ -218,7 +243,7 @@ function renderContactList() {
     <div class="contact-item" data-id="${c.id}">
       <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
       <div class="contact-info">
-        <div class="contact-name">${esc(c.name)}</div>
+        <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="No signing key on file — signature verification disabled">legacy</span>' : ''}</div>
         <div class="contact-last-msg">${c.lastMessage ? esc(c.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
       </div>
       <div class="contact-meta">
@@ -329,16 +354,20 @@ async function sendMessage() {
 
   try {
     const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
-    const { ciphertext, iv } = await SecurityManager.encryptMessage(
-      text, recipientPubKey, state.keypair.privateKey
+    const counter = await state.storage.incrementSentCounter(state.activeContactId);
+    const inner = await SecurityManager.encryptMessageEphemeral(
+      text, counter, recipientPubKey, contact.pubKeyHex, state.signKeypair.privateKey
     );
+    const outerCiphertext = encodeInnerEnvelope(inner);
 
-    const msgId = await state.storage.saveOutgoing(state.activeContactId, text, ciphertext, iv);
+    const msgId = await state.storage.saveOutgoing(
+      state.activeContactId, text, outerCiphertext, OUTER_IV_PLACEHOLDER
+    );
     await renderMessages();
     scrollToBottom();
     await refreshContacts();
 
-    await trySendToServer(msgId, contact, ciphertext, iv);
+    await trySendToServer(msgId, contact, outerCiphertext, OUTER_IV_PLACEHOLDER);
   } catch (e) {
     showToast('Encryption error: ' + e.message, 'error');
   }
@@ -407,19 +436,41 @@ async function runSync(serverUrl) {
     let maxTs = since;
     let gotNew = false;
 
-    for (const env of envelopes) {
+    // Process envelopes in chronological order defensively (the worker
+    // already sorts ASC by created_at, but don't rely on that).
+    const sorted = envelopes.slice().sort((a, b) => a.createdAt - b.createdAt);
+
+    for (const env of sorted) {
       const contact = await state.storage.getContactByPubKeyHash(env.senderHash);
       if (!contact) continue;
 
       try {
-        const senderPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
-        const plaintext = await SecurityManager.decryptMessage(
-          env.ciphertext, env.iv, senderPubKey, state.keypair.privateKey
+        const inner = decodeInnerEnvelope(env.ciphertext);
+        const senderSignPub = contact.legacy || !contact.signPubKeyHex
+          ? null
+          : await SecurityManager.importSignPublicKeyHex(contact.signPubKeyHex);
+        const { counter, plaintext } = await SecurityManager.decryptMessageEphemeral(
+          inner, state.ecdhKeypair.privateKey, state.ecdhPubKeyHex, senderSignPub
         );
+
+        const counters = await state.storage.getCounters(contact.id);
+        if (counter === null) {
+          // Legacy v1 ciphertext (no counter). Accept once but never advance
+          // last_received_counter, so any later v2 message rejects subsequent
+          // legacy replays via the monotonicity check below.
+          console.warn('Accepted legacy v1 ciphertext without replay counter', { contactId: contact.id });
+        } else if (counter <= counters.received) {
+          console.warn('Replay rejected', { contactId: contact.id, counter, lastSeen: counters.received });
+          if (env.createdAt > maxTs) maxTs = env.createdAt;
+          continue;
+        } else {
+          await state.storage.setReceivedCounter(contact.id, counter);
+        }
+
         const saved = await state.storage.saveIncoming(contact.id, plaintext, String(env.id));
         if (saved > 0) gotNew = true;
       } catch {
-        // Unknown sender key or corrupted envelope — skip silently
+        // Unknown sender key, bad signature, or corrupted envelope — skip silently
       }
 
       if (env.createdAt > maxTs) maxTs = env.createdAt;
@@ -444,9 +495,12 @@ function openModal(id) { $id(id).classList.remove('hidden'); }
 function closeModal(id) { $id(id).classList.add('hidden'); }
 
 function openIdentityModal() {
-  $id('identity-pubkey').textContent = state.pubKeyHex;
+  // Combined share string: <ecdh-pub-hex>:<sign-pub-hex>. Contacts using the
+  // legacy 130-char (ECDH-only) form remain accepted but won't get signature
+  // verification — see addContact().
+  $id('identity-pubkey').textContent = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
   $id('identity-hash').textContent = state.keyHash;
-  $id('identity-identicon').innerHTML = generateIdenticon(state.keyHash || state.pubKeyHex, 72);
+  $id('identity-identicon').innerHTML = generateIdenticon(state.keyHash || state.ecdhPubKeyHex, 72);
   openModal('modal-identity');
 }
 
@@ -470,29 +524,46 @@ async function saveSettings() {
 
 async function addContact() {
   const name = $id('contact-name-input').value.trim();
-  const keyHex = $id('contact-key-input').value.trim().toLowerCase();
+  const raw = $id('contact-key-input').value.trim().toLowerCase();
   clearErr('contact-error');
 
   if (!name) { showErr('contact-error', 'Name is required.'); return; }
-  if (keyHex.length !== 130 || !/^[0-9a-f]+$/.test(keyHex)) {
-    showErr('contact-error', 'Public key must be 130 hex characters (uncompressed P-256).');
+
+  // Accept the v2 combined form "<ecdhHex>:<signHex>" (261 chars) or the
+  // legacy ECDH-only form (130 chars). Legacy contacts won't have signed
+  // envelopes verified.
+  let ecdhHex, signHex;
+  if (raw.includes(':')) {
+    [ecdhHex, signHex] = raw.split(':');
+  } else {
+    ecdhHex = raw;
+    signHex = null;
+  }
+
+  if (ecdhHex.length !== 130 || !/^[0-9a-f]+$/.test(ecdhHex)) {
+    showErr('contact-error', 'ECDH public key must be 130 hex characters (uncompressed P-256).');
+    return;
+  }
+  if (signHex !== null && (signHex.length !== 130 || !/^[0-9a-f]+$/.test(signHex))) {
+    showErr('contact-error', 'Signing public key must be 130 hex characters (uncompressed P-256).');
     return;
   }
 
   try {
-    await SecurityManager.importPublicKeyHex(keyHex);
+    await SecurityManager.importPublicKeyHex(ecdhHex);
+    if (signHex) await SecurityManager.importSignPublicKeyHex(signHex);
   } catch {
     showErr('contact-error', 'Invalid P-256 public key.');
     return;
   }
 
   try {
-    await state.storage.addContact(name, keyHex);
+    await state.storage.addContact(name, ecdhHex, signHex);
     $id('contact-name-input').value = '';
     $id('contact-key-input').value = '';
     closeModal('modal-add-contact');
     await refreshContacts();
-    showToast(`${name} added`, 'success');
+    showToast(signHex ? `${name} added` : `${name} added (legacy contact — signatures disabled)`, signHex ? 'success' : 'info');
   } catch (e) {
     showErr('contact-error', e.message.includes('UNIQUE') ? 'That key is already saved.' : 'Failed to save contact.');
   }
@@ -594,7 +665,8 @@ function lockSession() {
   if (state.storage) state.storage.close().catch(() => {});
 
   Object.assign(state, {
-    masterKey: null, keypair: null, pubKeyHex: null, keyHash: null,
+    masterKey: null, ecdhKeypair: null, signKeypair: null,
+    ecdhPubKeyHex: null, signPubKeyHex: null, keyHash: null,
     storage: null, contacts: [], activeContactId: null, syncTimer: null, syncRunning: false,
   });
 
@@ -650,7 +722,7 @@ function wireEvents() {
 
   // Identity modal
   $id('btn-copy-pubkey').addEventListener('click', async () => {
-    await navigator.clipboard.writeText(state.pubKeyHex);
+    await navigator.clipboard.writeText(`${state.ecdhPubKeyHex}:${state.signPubKeyHex}`);
     showToast('Public key copied', 'success');
   });
   $id('btn-export-identity').addEventListener('click', () => { closeModal('modal-identity'); openExportWarning(); });

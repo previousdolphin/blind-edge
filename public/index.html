@@ -1408,9 +1408,9 @@
           <div class="about-heading">Getting Started</div>
           <ol>
             <li>Create an identity with a strong App Password</li>
-            <li>Tap <strong>Key</strong> to see your public key — copy and share it out-of-band with your contact (Signal, in person, etc.)</li>
-            <li>Have them share their public key with you</li>
-            <li>Tap <strong>+ Add</strong> to add them as a contact using their key</li>
+            <li>Tap <strong>Key</strong> → <strong>Copy Key</strong> — your key is two P-256 public keys joined by a colon (<code>ecdhKey:signingKey</code>). Share this string out-of-band with your contact (Signal, in person, etc.)</li>
+            <li>Have them share their key string with you</li>
+            <li>Tap <strong>+ Add</strong>, paste their key string, and give them a name. Contacts added with both keys get full signature verification; ECDH-only (legacy) contacts still work but without authenticity guarantees.</li>
             <li>Tap <strong>Set</strong> → enter the Worker URL → Save</li>
           </ol>
         </div>
