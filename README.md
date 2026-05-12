@@ -68,16 +68,19 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
   plaintext ✓
 ```
 
+**Groups** use a shared AES-256-GCM key distributed to each member via the existing 1:1 ECDH-encrypted path. Group messages are encrypted once and sent to the relay at `SHA-256(group_id)`; all members poll that address. The relay is unaware it is serving a group. When a member is added or removed, a new random key is generated and distributed only to the current members — the departing member's key is immediately invalidated.
+
 **Primitives — all native [`window.crypto.subtle`](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto), zero libraries:**
 
 | Primitive | Purpose |
 |---|---|
 | ECDH P-256 (ephemeral) | Per-message key agreement — sender-side forward secrecy |
 | ECDSA P-256 | Envelope signing — message authenticity |
-| HKDF SHA-256 | Key derivation — shared secret → AES key, bound to both public keys |
-| AES-256-GCM | Authenticated encryption of message content |
+| HKDF SHA-256 | Key derivation — shared secret → AES key, bound to both public keys; also seed → deterministic keypair |
+| AES-256-GCM | Authenticated encryption of message content and group messages |
 | PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private keys at rest |
-| SHA-256 | Public key → recipient hash (your "address") |
+| PBKDF2 SHA-512 (2048 rounds) | BIP39 seed phrase → 64-byte seed (standard BIP39 derivation) |
+| SHA-256 | Public key → recipient hash (your "address"); discovery code → relay address |
 
 ---
 
@@ -101,10 +104,12 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 The app ships pre-configured with a shared demo relay:
 
 1. Open [blind-edge.pages.dev](https://blind-edge.pages.dev)
-2. Create an identity (or import one)
+2. Create an identity — or restore one from a 12-word seed phrase
 3. Tap **Key** → **Copy Key** — your key is two P-256 public keys joined by a colon (`ecdhKey:signingKey`). Share this string out-of-band with your contact (Signal, in person, etc.)
-4. Have them share their key string → tap **+ Add**, paste it, give them a name
+4. Have them share their key string → tap **+ Add → By Key**, paste it, give them a name
 5. Start messaging
+
+> **Easier key exchange:** Tap **+ Add → By Code** to generate a one-time 6-character discovery code (valid 10 minutes). Share it verbally or over any channel. Your contact enters it on their side — keys are exchanged instantly without copying long hex strings. The code expires after 10 minutes; the relay only ever sees `SHA-256(code)`.
 
 > **Key format:** The combined key string is ~262 characters (`130 hex + : + 130 hex`). Both parties need the full string for signature verification. A 130-char ECDH-only key also works in legacy mode — encrypted but not signed.
 
@@ -243,7 +248,7 @@ Open your Pages URL in two different browsers. Create an identity on each, excha
 
 ## Relay API contract
 
-Any replacement relay must implement these two routes. The `worker/index.js` is the reference implementation.
+Any replacement relay must implement these routes. The `worker/index.js` is the reference implementation.
 
 **`POST /api/send`**
 
@@ -261,6 +266,18 @@ Returns `201 { ok: true, id: <rowId> }` or a 4xx error.
 **`GET /api/sync?for=<recipientHash>&since=<timestampMs>`**
 
 Returns `200 { envelopes: [{ id, senderHash, ciphertext, iv, createdAt }] }`.
+
+**`POST /api/meet`** — ephemeral discovery (10-min TTL)
+
+```json
+{ "hash": "<64-char hex SHA-256 of the 6-char code>", "ecdhPubHex": "...", "signPubHex": "..." }
+```
+
+Returns `201 { ok: true }`. The relay never sees the raw code — only its hash.
+
+**`GET /api/meet?hash=<64-char hex>`**
+
+Returns `200 { ecdhPubHex, signPubHex }` or `404` if expired/not found.
 
 The relay must return CORS headers for browser clients. It needs no auth, no user table, and no knowledge of message content.
 
@@ -308,6 +325,10 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 - **Zero-knowledge relay** — server stores and forwards ciphertext it cannot read
 - **Local-first** — messages written to local IndexedDB instantly; works offline
 - **No accounts** — identity is a browser-generated keypair locked with your App Password
+- **Seed phrase recovery** — create or restore an identity from 12 BIP39 words + optional 13th-word passphrase; view your seed any time via Key → Show Seed Phrase
+- **Ephemeral discovery codes** — 6-character one-time codes (10-min TTL) for frictionless key exchange; share verbally, relay sees only SHA-256(code)
+- **Group chat** — multi-user groups with a shared AES-256-GCM key, creator-only admin, auto-accept invites; relay is unaware of groups
+- **Group key rotation** — new random key generated and distributed on every membership change; removed members cannot read future messages
 - **Sender-side forward secrecy** — per-message ephemeral ECDH; past messages safe if long-term key leaks
 - **Signed envelopes** — ECDSA signature over ephemeral key + ciphertext; tampered messages rejected before decryption
 - **Replay protection** — monotonic counter inside every ciphertext; out-of-order or replayed messages dropped
@@ -326,8 +347,6 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 
 - **Text only** — no image/file transfer
 - **Sender-side PFS only** — ephemeral ECDH protects the sender's past messages; full bidirectional PFS (à la Signal's Double Ratchet) would require prekey bundles published by the recipient
-- **Manual key exchange** — contacts are added by sharing a public key string out-of-band; no discovery server
-- **No group messaging** — strictly pairwise conversations
 - **Local history only** — message history does not sync between devices; only new messages arrive after import
 - **Shared relay** — the demo relay is shared infrastructure; run your own for production privacy
 
@@ -341,6 +360,7 @@ blind-edge/
 │   ├── index.html       # App shell + all CSS
 │   ├── app.js           # Orchestration, sync engine, UI
 │   ├── crypto.js        # SecurityManager — all WebCrypto operations
+│   ├── bip39.js         # BIP39 wordlist, mnemonic encode/decode, seed derivation
 │   ├── hex.js           # Shared hex encoding with strict validation
 │   ├── storage.js       # StorageManager — sql.js + IndexedDB
 │   ├── sw.js            # Service worker (PWA caching)
@@ -375,10 +395,14 @@ blind-edge/
 This entire project was generated by [Claude Code](https://claude.ai/code) from a natural-language specification — then iteratively hardened across follow-up sessions. The work covered:
 
 - Full cryptographic protocol: PBKDF2 vault, ECDH, ECDHE (per-message ephemeral keys), ECDSA signing, HKDF key binding, AES-256-GCM, monotonic replay counters, 256-byte message padding — all native Web Crypto API, zero libraries
+- BIP39 seed phrase recovery: PBKDF2-SHA512 → HKDF → deterministic P-256 keypair derivation via PKCS8 DER trick (no EC math library)
+- Ephemeral discovery codes: 6-char one-time codes with SHA-256 relay registration, 10-min TTL, verbal out-of-band exchange
+- Multi-user group chat: shared AES-256-GCM key, key rotation on every membership change, creator-only admin, auto-accept invites, zero relay changes
+- Per-identity IndexedDB isolation: each identity's SQLite database keyed by its public key hash
 - Local SQLite via sql.js WASM with IndexedDB persistence (cross-browser, including Safari)
 - Reference relay implementation on Cloudflare Workers + D1 with parameterized queries, CORS validation, rate limiting, and scheduled TTL pruning
 - PWA manifest and service worker with cache-first shell + network-first API strategy
-- Complete UI: auth flows, contact management, live chat, settings, modals, toast notifications, identicons
+- Complete UI: auth flows, contact management, live chat, group chat, settings, modals, toast notifications, identicons
 - Security hardening: identity export warning, per-conversation autodestruct, v1→v2 identity migration
 - 18-test automated suite via node:test
 - B.E.Chat branding: SVG logo with chrome bubble letters and blindfolded hero

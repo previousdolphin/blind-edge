@@ -31,14 +31,19 @@ export class StorageManager {
     this._idb = null;
   }
 
-  async init() {
+  async init(storageKey = 'db') {
+    this._storageKey = storageKey;
     this._idb = await idbOpen();
 
     const SQL = await initSqlJs({
       locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/' + file
     });
 
-    const existing = await idbGet(this._idb, 'db');
+    let existing = await idbGet(this._idb, storageKey);
+    // One-time migration: if no per-identity blob yet, inherit the legacy shared blob
+    if (!existing && storageKey !== 'db') {
+      existing = await idbGet(this._idb, 'db');
+    }
     this._db = existing ? new SQL.Database(existing) : new SQL.Database();
 
     await this._migrate();
@@ -413,7 +418,7 @@ export class StorageManager {
   }
 
   async _persist() {
-    await idbPut(this._idb, 'db', this._db.export());
+    await idbPut(this._idb, this._storageKey, this._db.export());
   }
 
   async close() {

@@ -1703,17 +1703,23 @@
         <div class="about-section">
           <div class="about-heading">Your Identity</div>
           <p>A cryptographic keypair generated in your browser. Your private key is encrypted with your App Password via <strong>PBKDF2 (600,000 rounds)</strong> and stored locally — it never leaves your device. Your <strong>identicon</strong> (the pixel pattern next to your key) is a visual fingerprint derived from your public key, making out-of-band verification faster than comparing raw hex strings. Export only when moving to a new device, then delete the file immediately.</p>
+          <p>If you created your identity from a <strong>seed phrase</strong> (12 BIP39 words + optional passphrase), you can view and back up those words any time via <strong>Key → Show Seed Phrase</strong>. Identities generated without a seed phrase cannot show one — the option only appears when derivation was seed-based.</p>
         </div>
 
         <div class="about-section">
           <div class="about-heading">Getting Started</div>
           <ol>
-            <li>Create an identity with a strong App Password</li>
+            <li>Create an identity with a strong App Password — or restore one from a 12-word seed phrase</li>
             <li>Tap <strong>Key</strong> → <strong>Copy Key</strong> — your key is two P-256 public keys joined by a colon (<code>ecdhKey:signingKey</code>). Share this string out-of-band with your contact (Signal, in person, etc.)</li>
-            <li>Have them share their key string with you</li>
-            <li>Tap <strong>+ Add</strong>, paste their key string, and give them a name. Contacts added with both keys get full signature verification; ECDH-only (legacy) contacts still work but without authenticity guarantees.</li>
+            <li>Have them share their key string with you → tap <strong>+ Add → By Key</strong>, paste it, and give them a name</li>
+            <li><strong>Alternatively:</strong> tap <strong>+ Add → By Code</strong>, generate a 6-character discovery code, and share it verbally. Your contact enters it on their side — keys exchange instantly, no long strings needed. The code expires after 10 minutes.</li>
             <li>Tap <strong>Set</strong> → enter the Worker URL → Save</li>
           </ol>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Group Chats</div>
+          <p>Tap <strong>+ Group</strong> to create a group from your existing contacts. Groups use a shared <strong>AES-256-GCM</strong> key distributed to each member over the existing encrypted 1:1 channel — the relay sees the group only as an anonymous hash address and is unaware it is serving a group. When you add or remove a member, a new key is generated and distributed to current members only; the removed member cannot read future messages.</p>
         </div>
 
         <div class="about-section">

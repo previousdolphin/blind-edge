@@ -207,7 +207,7 @@ async function bootApp(identity, masterKey, salt) {
   }
 
   state.storage = new StorageManager();
-  await state.storage.init();
+  await state.storage.init(state.keyHash);
 
   $id('view-auth').classList.add('hidden');
   $id('view-app').classList.remove('hidden');
