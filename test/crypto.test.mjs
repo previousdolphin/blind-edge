@@ -15,12 +15,53 @@ test('HKDF info string is symmetric: sender and receiver derive matching keys', 
   const bob = await makeIdentity();
 
   const { ciphertext, iv } = await SecurityManager.encryptMessage(
-    'hello bob', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex
+    'hello bob', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex, 1
   );
-  const plaintext = await SecurityManager.decryptMessage(
+  const { plaintext } = await SecurityManager.decryptMessage(
     ciphertext, iv, alice.kp.publicKey, bob.kp.privateKey, alice.pubHex, bob.pubHex
   );
   assert.equal(plaintext, 'hello bob');
+});
+
+test('encryptMessage wraps payload with v2 counter; decrypt returns it', async () => {
+  const alice = await makeIdentity();
+  const bob = await makeIdentity();
+
+  for (const c of [1, 2, 3]) {
+    const { ciphertext, iv } = await SecurityManager.encryptMessage(
+      `msg ${c}`, bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex, c
+    );
+    const out = await SecurityManager.decryptMessage(
+      ciphertext, iv, alice.kp.publicKey, bob.kp.privateKey, alice.pubHex, bob.pubHex
+    );
+    assert.equal(out.counter, c);
+    assert.equal(out.plaintext, `msg ${c}`);
+  }
+});
+
+test('decryptMessage returns counter:null for legacy v1 raw plaintext', async () => {
+  // Hand-craft a v1-style ciphertext: raw text, no JSON wrapping. We rebuild
+  // it using the internal padding format the original code used.
+  const alice = await makeIdentity();
+  const bob = await makeIdentity();
+  const aesKey = await SecurityManager._deriveSharedAesKey(
+    bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const raw = 'plain legacy message';
+  const msgBytes = new TextEncoder().encode(raw);
+  const padded = new Uint8Array(4 + Math.ceil((msgBytes.length + 4) / 256) * 256);
+  new DataView(padded.buffer).setUint32(0, msgBytes.length, true);
+  padded.set(msgBytes, 4);
+  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, padded);
+  const ciphertext = bytesToHex(new Uint8Array(ctBuf));
+  const ivHex = bytesToHex(iv);
+
+  const out = await SecurityManager.decryptMessage(
+    ciphertext, ivHex, alice.kp.publicKey, bob.kp.privateKey, alice.pubHex, bob.pubHex
+  );
+  assert.equal(out.counter, null);
+  assert.equal(out.plaintext, raw);
 });
 
 test('HKDF info string binds per-pair: different pairs derive different keys', async () => {
@@ -29,7 +70,7 @@ test('HKDF info string binds per-pair: different pairs derive different keys', a
   const charlie = await makeIdentity();
 
   const { ciphertext, iv } = await SecurityManager.encryptMessage(
-    'for bob only', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex
+    'for bob only', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex, 1
   );
 
   // Charlie (with bob's private key, simulating an attacker who somehow swapped

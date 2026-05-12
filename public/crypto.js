@@ -91,15 +91,19 @@ export class SecurityManager {
     );
   }
 
-  static async encryptMessage(plaintext, recipientPubKey, senderPrivKey, recipientPubKeyHex, senderPubKeyHex) {
+  static async encryptMessage(plaintext, recipientPubKey, senderPrivKey, recipientPubKeyHex, senderPubKeyHex, counter) {
     const aesKey = await SecurityManager._deriveSharedAesKey(
       recipientPubKey, senderPrivKey, recipientPubKeyHex, senderPubKeyHex
     );
     const iv = crypto.getRandomValues(new Uint8Array(12));
 
-    // Pad to next 256-byte boundary to defeat traffic-length analysis.
-    // Format: [4-byte LE message length][message bytes][random padding]
-    const msgBytes = new TextEncoder().encode(plaintext);
+    // Wrap plaintext in a v2 envelope carrying a strictly-monotonic counter.
+    // The counter goes inside the AES-GCM ciphertext so the relay can't
+    // observe or tamper with it. Pad to next 256-byte boundary to defeat
+    // traffic-length analysis.
+    // Format: [4-byte LE message length][JSON envelope bytes][random padding]
+    const wrapped = JSON.stringify({ v: 2, c: counter, m: plaintext });
+    const msgBytes = new TextEncoder().encode(wrapped);
     const msgLen = msgBytes.length;
     const padded = new Uint8Array(4 + Math.ceil((msgLen + 4) / 256) * 256);
     new DataView(padded.buffer).setUint32(0, msgLen, true);
@@ -132,7 +136,16 @@ export class SecurityManager {
       // Unpad: read 4-byte LE length prefix, extract that many bytes
       const padded = new Uint8Array(plaintextBuf);
       const msgLen = new DataView(padded.buffer).getUint32(0, true);
-      return new TextDecoder().decode(padded.subarray(4, 4 + msgLen));
+      const text = new TextDecoder().decode(padded.subarray(4, 4 + msgLen));
+      // v2 envelopes are JSON {v, c, m}. Legacy v1 ciphertexts contain raw
+      // plaintext with no counter; return counter:null so the caller can
+      // apply its legacy-acceptance policy.
+      let inner;
+      try { inner = JSON.parse(text); } catch { inner = null; }
+      if (inner && typeof inner === 'object' && inner.v === 2 && 'c' in inner) {
+        return { counter: inner.c, plaintext: inner.m };
+      }
+      return { counter: null, plaintext: text };
     } catch {
       throw new Error('Decryption failed — wrong key or corrupted data');
     }

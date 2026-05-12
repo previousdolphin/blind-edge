@@ -81,6 +81,44 @@ export class StorageManager {
       this._db.run('ALTER TABLE contacts ADD COLUMN ttl_seconds INTEGER');
     } catch (_) {}
 
+    // Per-contact monotonic message counters for replay protection.
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN last_sent_counter INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+    try {
+      this._db.run('ALTER TABLE contacts ADD COLUMN last_received_counter INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+
+    await this._persist();
+  }
+
+  async getCounters(contactId) {
+    const rows = this._query(
+      'SELECT last_sent_counter as sent, last_received_counter as received FROM contacts WHERE id = ?',
+      [contactId]
+    );
+    if (!rows.length) return { sent: 0, received: 0 };
+    return { sent: rows[0].sent || 0, received: rows[0].received || 0 };
+  }
+
+  async incrementSentCounter(contactId) {
+    this._db.run(
+      'UPDATE contacts SET last_sent_counter = last_sent_counter + 1 WHERE id = ?',
+      [contactId]
+    );
+    const rows = this._query(
+      'SELECT last_sent_counter as c FROM contacts WHERE id = ?',
+      [contactId]
+    );
+    await this._persist();
+    return rows[0].c;
+  }
+
+  async setReceivedCounter(contactId, counter) {
+    this._db.run(
+      'UPDATE contacts SET last_received_counter = ? WHERE id = ?',
+      [counter, contactId]
+    );
     await this._persist();
   }
 

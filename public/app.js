@@ -324,8 +324,9 @@ async function sendMessage() {
 
   try {
     const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
+    const counter = await state.storage.incrementSentCounter(state.activeContactId);
     const { ciphertext, iv } = await SecurityManager.encryptMessage(
-      text, recipientPubKey, state.keypair.privateKey, contact.pubKeyHex, state.pubKeyHex
+      text, recipientPubKey, state.keypair.privateKey, contact.pubKeyHex, state.pubKeyHex, counter
     );
 
     const msgId = await state.storage.saveOutgoing(state.activeContactId, text, ciphertext, iv);
@@ -402,16 +403,35 @@ async function runSync(serverUrl) {
     let maxTs = since;
     let gotNew = false;
 
-    for (const env of envelopes) {
+    // Process envelopes in chronological order defensively (the worker
+    // already sorts ASC by created_at, but don't rely on that).
+    const sorted = envelopes.slice().sort((a, b) => a.createdAt - b.createdAt);
+
+    for (const env of sorted) {
       const contact = await state.storage.getContactByPubKeyHash(env.senderHash);
       if (!contact) continue;
 
       try {
         const senderPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
-        const plaintext = await SecurityManager.decryptMessage(
+        const { counter, plaintext } = await SecurityManager.decryptMessage(
           env.ciphertext, env.iv, senderPubKey, state.keypair.privateKey,
           contact.pubKeyHex, state.pubKeyHex
         );
+
+        const counters = await state.storage.getCounters(contact.id);
+        if (counter === null) {
+          // Legacy v1 ciphertext (no counter). Accept once but never advance
+          // last_received_counter, so any later v2 message rejects subsequent
+          // legacy replays via the monotonicity check below.
+          console.warn('Accepted legacy v1 ciphertext without replay counter', { contactId: contact.id });
+        } else if (counter <= counters.received) {
+          console.warn('Replay rejected', { contactId: contact.id, counter, lastSeen: counters.received });
+          if (env.createdAt > maxTs) maxTs = env.createdAt;
+          continue;
+        } else {
+          await state.storage.setReceivedCounter(contact.id, counter);
+        }
+
         const saved = await state.storage.saveIncoming(contact.id, plaintext, String(env.id));
         if (saved > 0) gotNew = true;
       } catch {
