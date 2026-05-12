@@ -325,7 +325,7 @@ async function sendMessage() {
   try {
     const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
     const { ciphertext, iv } = await SecurityManager.encryptMessage(
-      text, recipientPubKey, state.keypair.privateKey
+      text, recipientPubKey, state.keypair.privateKey, contact.pubKeyHex, state.pubKeyHex
     );
 
     const msgId = await state.storage.saveOutgoing(state.activeContactId, text, ciphertext, iv);
@@ -409,7 +409,8 @@ async function runSync(serverUrl) {
       try {
         const senderPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
         const plaintext = await SecurityManager.decryptMessage(
-          env.ciphertext, env.iv, senderPubKey, state.keypair.privateKey
+          env.ciphertext, env.iv, senderPubKey, state.keypair.privateKey,
+          contact.pubKeyHex, state.pubKeyHex
         );
         const saved = await state.storage.saveIncoming(contact.id, plaintext, String(env.id));
         if (saved > 0) gotNew = true;

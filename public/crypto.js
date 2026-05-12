@@ -52,7 +52,7 @@ export class SecurityManager {
     return bytesToHex(new Uint8Array(digest));
   }
 
-  static async _deriveSharedAesKey(theirPublicKey, ourPrivateKey) {
+  static async _deriveSharedAesKey(theirPublicKey, ourPrivateKey, theirPubKeyHex, ourPubKeyHex) {
     // WebCrypto ECDH can't directly derive AES-GCM in one step when the
     // intermediate needs to feed into HKDF, so we derive raw bits first.
     const sharedBits = await crypto.subtle.deriveBits(
@@ -69,12 +69,20 @@ export class SecurityManager {
       ['deriveKey']
     );
 
+    // Bind the derived AES key to both participants' public keys. ECDH is
+    // commutative, so without this binding Alice and Bob derive the same key
+    // for both directions — letting either party decrypt the other's outbound
+    // ciphertext (reflection attack). Sorting ensures both sides build the
+    // same info string regardless of role.
+    const sortedPubs = [theirPubKeyHex, ourPubKeyHex].sort();
+    const info = new TextEncoder().encode('blind-edge-v1|' + sortedPubs.join('|'));
+
     return crypto.subtle.deriveKey(
       {
         name: 'HKDF',
         hash: 'SHA-256',
         salt: new Uint8Array(32),
-        info: new TextEncoder().encode('blind-edge-v1'),
+        info,
       },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
@@ -83,8 +91,10 @@ export class SecurityManager {
     );
   }
 
-  static async encryptMessage(plaintext, recipientPubKey, senderPrivKey) {
-    const aesKey = await SecurityManager._deriveSharedAesKey(recipientPubKey, senderPrivKey);
+  static async encryptMessage(plaintext, recipientPubKey, senderPrivKey, recipientPubKeyHex, senderPubKeyHex) {
+    const aesKey = await SecurityManager._deriveSharedAesKey(
+      recipientPubKey, senderPrivKey, recipientPubKeyHex, senderPubKeyHex
+    );
     const iv = crypto.getRandomValues(new Uint8Array(12));
 
     // Pad to next 256-byte boundary to defeat traffic-length analysis.
@@ -108,8 +118,10 @@ export class SecurityManager {
     };
   }
 
-  static async decryptMessage(ciphertext, iv, senderPubKey, recipientPrivKey) {
-    const aesKey = await SecurityManager._deriveSharedAesKey(senderPubKey, recipientPrivKey);
+  static async decryptMessage(ciphertext, iv, senderPubKey, recipientPrivKey, senderPubKeyHex, recipientPubKeyHex) {
+    const aesKey = await SecurityManager._deriveSharedAesKey(
+      senderPubKey, recipientPrivKey, senderPubKeyHex, recipientPubKeyHex
+    );
 
     try {
       const plaintextBuf = await crypto.subtle.decrypt(

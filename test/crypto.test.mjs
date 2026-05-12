@@ -2,6 +2,47 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { hexToBytes, bytesToHex } from '../public/hex.js';
+import { SecurityManager } from '../public/crypto.js';
+
+async function makeIdentity() {
+  const kp = await SecurityManager.generateIdentity();
+  const pubHex = await SecurityManager.exportPublicKeyHex(kp.publicKey);
+  return { kp, pubHex };
+}
+
+test('HKDF info string is symmetric: sender and receiver derive matching keys', async () => {
+  const alice = await makeIdentity();
+  const bob = await makeIdentity();
+
+  const { ciphertext, iv } = await SecurityManager.encryptMessage(
+    'hello bob', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex
+  );
+  const plaintext = await SecurityManager.decryptMessage(
+    ciphertext, iv, alice.kp.publicKey, bob.kp.privateKey, alice.pubHex, bob.pubHex
+  );
+  assert.equal(plaintext, 'hello bob');
+});
+
+test('HKDF info string binds per-pair: different pairs derive different keys', async () => {
+  const alice = await makeIdentity();
+  const bob = await makeIdentity();
+  const charlie = await makeIdentity();
+
+  const { ciphertext, iv } = await SecurityManager.encryptMessage(
+    'for bob only', bob.kp.publicKey, alice.kp.privateKey, bob.pubHex, alice.pubHex
+  );
+
+  // Charlie (with bob's private key, simulating an attacker who somehow swapped
+  // identity binding) decrypting with charlie<>alice info string must fail.
+  // We invoke decrypt with the WRONG hex pair to confirm info binding is
+  // load-bearing — same shared bits would decrypt with the right info.
+  await assert.rejects(
+    () => SecurityManager.decryptMessage(
+      ciphertext, iv, alice.kp.publicKey, bob.kp.privateKey, alice.pubHex, charlie.pubHex
+    ),
+    /Decryption failed/
+  );
+});
 
 test('hexToBytes rejects non-hex characters', () => {
   assert.throws(() => hexToBytes('z1'), /non-hex character/);
