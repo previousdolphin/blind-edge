@@ -63,7 +63,7 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 | ECDH P-256 | Key agreement — shared secret from two keypairs |
 | HKDF SHA-256 | Key derivation — shared secret → AES key |
 | AES-256-GCM | Authenticated encryption of message content |
-| PBKDF2 SHA-256 (210k rounds) | App Password → vault key for private key at rest |
+| PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private key at rest |
 | SHA-256 | Public key → recipient hash (your "address") |
 
 ---
@@ -268,6 +268,10 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 - **Secure export flow** — key export requires explicit checkbox confirmation with a detailed risk warning
 - **Installable PWA** — add to home screen on iOS/Android/desktop
 - **Pending retry** — outgoing messages marked `pending` are retried on every sync cycle
+- **Message padding** — all payloads padded to 256-byte blocks before encryption; ciphertext length reveals nothing about message length
+- **Server-side envelope TTL** — Cloudflare Cron Trigger prunes envelopes older than 24 hours every 6 hours; relay never accumulates ciphertext indefinitely
+- **IP rate limiting** — Worker enforces 30 sends/min and 180 syncs/min per IP to resist relay flooding
+- **Identicons** — contacts and your own identity display a deterministic pixel-art avatar derived from the public key, making out-of-band key verification faster and less error-prone than comparing raw hex
 
 ---
 
