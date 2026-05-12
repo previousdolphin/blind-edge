@@ -54,7 +54,10 @@ const state = {
   keyHash: null,
   storage: null,
   contacts: [],
+  groups: [],
   activeContactId: null,
+  activeGroupId: null,
+  activeGroupMembers: null,
   syncTimer: null,
   syncRunning: false,
 };
@@ -225,7 +228,10 @@ async function bootApp(identity, masterKey, salt) {
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
 async function refreshContacts() {
-  state.contacts = await state.storage.getContacts();
+  [state.contacts, state.groups] = await Promise.all([
+    state.storage.getContacts(),
+    state.storage.getGroups(),
+  ]);
   renderContactList();
 }
 
@@ -233,29 +239,54 @@ function renderContactList() {
   const list = $id('contact-list');
   const empty = $id('contact-empty');
 
-  if (!state.contacts.length) {
+  const contactItems = state.contacts.map(c => ({ ...c, _type: 'contact', _ts: c.lastTs || 0 }));
+  const groupItems = state.groups.map(g => ({ ...g, _type: 'group', _ts: g.lastTs || 0 }));
+  const allItems = [...contactItems, ...groupItems].sort((a, b) => b._ts - a._ts);
+
+  if (!allItems.length) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
     return;
   }
 
   empty.classList.add('hidden');
-  list.innerHTML = state.contacts.map(c => `
-    <div class="contact-item" data-id="${c.id}">
-      <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
-      <div class="contact-info">
-        <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="No signing key on file — signature verification disabled">legacy</span>' : ''}</div>
-        <div class="contact-last-msg">${c.lastMessage ? esc(c.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
-      </div>
-      <div class="contact-meta">
-        <div class="contact-time">${fmtTime(c.lastTs)}</div>
-        <div class="contact-unread">${c.unread > 0 ? c.unread : ''}</div>
-      </div>
-    </div>
-  `).join('');
+  list.innerHTML = allItems.map(item => {
+    if (item._type === 'contact') {
+      const c = item;
+      return `
+        <div class="contact-item" data-id="${c.id}">
+          <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
+          <div class="contact-info">
+            <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="No signing key — signature verification disabled">legacy</span>' : ''}</div>
+            <div class="contact-last-msg">${c.lastMessage ? esc(c.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
+          </div>
+          <div class="contact-meta">
+            <div class="contact-time">${fmtTime(c.lastTs)}</div>
+            <div class="contact-unread">${c.unread > 0 ? c.unread : ''}</div>
+          </div>
+        </div>`;
+    } else {
+      const g = item;
+      return `
+        <div class="contact-item group-item" data-group-id="${g.id}">
+          <div class="contact-avatar">${generateIdenticon(g.groupHash, 36)}</div>
+          <div class="contact-info">
+            <div class="contact-name">${esc(g.name)} <span class="group-badge">group</span></div>
+            <div class="contact-last-msg">${g.lastMessage ? esc(g.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
+          </div>
+          <div class="contact-meta">
+            <div class="contact-time">${fmtTime(g.lastTs)}</div>
+            <div class="contact-unread">${g.unread > 0 ? g.unread : ''}</div>
+          </div>
+        </div>`;
+    }
+  }).join('');
 
-  list.querySelectorAll('.contact-item').forEach(el => {
+  list.querySelectorAll('.contact-item:not(.group-item)').forEach(el => {
     el.addEventListener('click', () => openChat(parseInt(el.dataset.id, 10)));
+  });
+  list.querySelectorAll('.group-item').forEach(el => {
+    el.addEventListener('click', () => openGroupChat(parseInt(el.dataset.groupId, 10)));
   });
 }
 
@@ -318,13 +349,51 @@ async function openChat(contactId) {
 
 function goBack() {
   state.activeContactId = null;
+  state.activeGroupId = null;
+  state.activeGroupMembers = null;
   $id('panel-chat').classList.add('hidden');
   $id('panel-contacts').classList.remove('hidden');
   $id('btn-back').classList.add('hidden');
   $id('btn-ttl').classList.add('hidden');
   $id('ttl-notice').classList.add('hidden');
+  $id('btn-group-members').classList.add('hidden');
   $id('app-title').textContent = 'Blind-Edge';
   refreshContacts();
+}
+
+async function openGroupChat(groupId) {
+  state.activeGroupId = groupId;
+  state.activeContactId = null;
+  const group = state.groups.find(g => g.id === groupId);
+
+  $id('panel-contacts').classList.add('hidden');
+  $id('panel-chat').classList.remove('hidden');
+  $id('btn-back').classList.remove('hidden');
+  $id('app-title').textContent = group ? group.name : 'Group';
+  $id('btn-ttl').classList.add('hidden');
+  $id('ttl-notice').classList.add('hidden');
+  $id('btn-group-members').classList.remove('hidden');
+
+  state.activeGroupMembers = await state.storage.getGroupMembers(groupId);
+  await state.storage.markGroupRead(groupId);
+  await renderGroupMessages();
+  scrollToBottom();
+  $id('compose-input').focus();
+}
+
+async function renderGroupMessages() {
+  const msgs = await state.storage.getGroupMessages(state.activeGroupId);
+  const members = state.activeGroupMembers || [];
+  $id('message-list').innerHTML = msgs.map(m => {
+    const isMe = m.senderHash === state.keyHash;
+    const member = members.find(mem => mem.keyHash === m.senderHash);
+    const senderName = isMe ? 'You' : (member?.name || m.senderHash.slice(0, 8) + '…');
+    return `
+      <div class="message ${isMe ? 'out' : 'in'}">
+        ${!isMe ? `<div class="group-sender">${esc(senderName)}</div>` : ''}
+        <div class="bubble">${esc(m.text)}</div>
+      </div>`;
+  }).join('');
 }
 
 async function renderMessages() {
@@ -342,7 +411,39 @@ function scrollToBottom() {
   list.scrollTop = list.scrollHeight;
 }
 
+async function sendGroupMessage() {
+  const input = $id('compose-input');
+  const text = input.value.trim();
+  if (!text || state.activeGroupId === null) return;
+  const group = state.groups.find(g => g.id === state.activeGroupId);
+  if (!group) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  try {
+    const { ciphertext, iv } = await SecurityManager.groupEncrypt(
+      text, group.groupKey, state.signKeypair.privateKey, group.groupId, state.keyHash
+    );
+    const serverUrl = (await state.storage.getSetting('serverUrl')) || '';
+    if (serverUrl) {
+      await fetch(`${serverUrl}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient_hash: group.groupHash, sender_hash: state.keyHash, ciphertext, iv }),
+      });
+    }
+    await state.storage.addGroupMessage(state.activeGroupId, state.keyHash, text, true, Date.now(), `local-${Date.now()}-${Math.random()}`);
+    await renderGroupMessages();
+    scrollToBottom();
+    await refreshContacts();
+  } catch (e) {
+    showToast('Send failed: ' + e.message, 'error');
+  }
+}
+
 async function sendMessage() {
+  if (state.activeGroupId !== null) { await sendGroupMessage(); return; }
   const input = $id('compose-input');
   const text = input.value.trim();
   if (!text || !state.activeContactId) return;
@@ -443,7 +544,7 @@ async function runSync(serverUrl) {
 
     for (const env of sorted) {
       const contact = await state.storage.getContactByPubKeyHash(env.senderHash);
-      if (!contact) continue;
+      if (!contact) { if (env.createdAt > maxTs) maxTs = env.createdAt; continue; }
 
       try {
         const inner = decodeInnerEnvelope(env.ciphertext);
@@ -456,9 +557,6 @@ async function runSync(serverUrl) {
 
         const counters = await state.storage.getCounters(contact.id);
         if (counter === null) {
-          // Legacy v1 ciphertext (no counter). Accept once but never advance
-          // last_received_counter, so any later v2 message rejects subsequent
-          // legacy replays via the monotonicity check below.
           console.warn('Accepted legacy v1 ciphertext without replay counter', { contactId: contact.id });
         } else if (counter <= counters.received) {
           console.warn('Replay rejected', { contactId: contact.id, counter, lastSeen: counters.received });
@@ -468,8 +566,23 @@ async function runSync(serverUrl) {
           await state.storage.setReceivedCounter(contact.id, counter);
         }
 
-        const saved = await state.storage.saveIncoming(contact.id, plaintext, String(env.id));
-        if (saved > 0) gotNew = true;
+        // Route system messages (group invites / key updates)
+        let isSystem = false;
+        try {
+          const parsed = JSON.parse(plaintext);
+          if (parsed?.type === 'group-invite') {
+            await handleGroupInvite(parsed);
+            isSystem = true;
+          } else if (parsed?.type === 'group-key-update') {
+            await handleGroupKeyUpdate(parsed);
+            isSystem = true;
+          }
+        } catch (_) {}
+
+        if (!isSystem) {
+          const saved = await state.storage.saveIncoming(contact.id, plaintext, String(env.id));
+          if (saved > 0) gotNew = true;
+        }
       } catch {
         // Unknown sender key, bad signature, or corrupted envelope — skip silently
       }
@@ -479,15 +592,315 @@ async function runSync(serverUrl) {
 
     if (maxTs > since) await state.storage.setSetting('lastSync', String(maxTs));
 
-    if (gotNew) {
+    // Sync group messages
+    const groupsGotNew = await syncGroups(serverUrl);
+
+    if (gotNew || groupsGotNew) {
       await refreshContacts();
       if (state.activeContactId !== null) { await renderMessages(); scrollToBottom(); }
+      if (state.activeGroupId !== null) {
+        state.activeGroupMembers = await state.storage.getGroupMembers(state.activeGroupId);
+        await renderGroupMessages();
+        scrollToBottom();
+      }
     }
   } catch {
     // Network failure — silent
   } finally {
     state.syncRunning = false;
   }
+}
+
+async function syncGroups(serverUrl) {
+  let gotNew = false;
+  const groups = await state.storage.getGroups();
+  for (const group of groups) {
+    try {
+      const res = await fetch(`${serverUrl}/api/sync?for=${group.groupHash}&since=${group.lastSync}`);
+      if (!res.ok) continue;
+      const { envelopes } = await res.json();
+      let maxTs = group.lastSync;
+      const sorted = envelopes.slice().sort((a, b) => a.createdAt - b.createdAt);
+      for (const env of sorted) {
+        if (env.senderHash === state.keyHash) { if (env.createdAt > maxTs) maxTs = env.createdAt; continue; }
+        try {
+          const payload = await SecurityManager.groupDecrypt(env.ciphertext, env.iv, group.groupKey);
+          if (!payload || payload.type !== 'group-msg' || payload.group_id !== group.groupId) continue;
+
+          const members = await state.storage.getGroupMembers(group.id);
+          const senderMember = members.find(m => m.keyHash === payload.sender_hash);
+          let sigValid = false;
+          if (senderMember?.signPubHex) {
+            try {
+              const pub = await SecurityManager.importSignPublicKeyHex(senderMember.signPubHex);
+              sigValid = await SecurityManager.groupVerifySig(payload, env.iv, pub);
+            } catch (_) {}
+          }
+
+          const saved = await state.storage.addGroupMessage(
+            group.id, payload.sender_hash, payload.text, sigValid, payload.ts, String(env.id)
+          );
+          if (saved > 0) gotNew = true;
+        } catch (_) {}
+        if (env.createdAt > maxTs) maxTs = env.createdAt;
+      }
+      if (maxTs > group.lastSync) await state.storage.setGroupSyncCursor(group.id, maxTs);
+    } catch (_) {}
+  }
+  return gotNew;
+}
+
+// ─── Group management ─────────────────────────────────────────────────────────
+
+async function handleGroupInvite(payload) {
+  const existing = await state.storage.getGroupByIdHex(payload.group_id);
+  if (existing) return; // already have this group
+
+  const groupDbId = await state.storage.createGroup(
+    payload.group_name, payload.group_id, payload.group_hash, payload.group_key, false
+  );
+  // Set sync cursor to now so we only receive new messages
+  await state.storage.setGroupSyncCursor(groupDbId, Date.now());
+
+  for (const m of payload.members) {
+    // Prefer local contact name if we know this key
+    const contact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+    const name = (m.ecdhPubHex === state.ecdhPubKeyHex) ? 'You' : (contact?.name || m.name || m.ecdhPubHex.slice(0, 8) + '…');
+    await state.storage.addGroupMember(groupDbId, name, m.ecdhPubHex, m.signPubHex || null);
+  }
+
+  await refreshContacts();
+  showToast(`Added to group "${payload.group_name}"`, 'info');
+}
+
+async function handleGroupKeyUpdate(payload) {
+  const group = await state.storage.getGroupByIdHex(payload.group_id);
+  if (!group) return;
+  const memberObjs = (payload.members || []).map(m => {
+    const contact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+    return {
+      name: (m.ecdhPubHex === state.ecdhPubKeyHex) ? 'You' : (contact?.name || m.name || m.ecdhPubHex.slice(0, 8) + '…'),
+      ecdhPubHex: m.ecdhPubHex,
+      signPubHex: m.signPubHex || null,
+    };
+  });
+  await state.storage.updateGroupKey(payload.group_id, payload.group_key, memberObjs);
+  if (state.activeGroupId === group.id) {
+    state.activeGroupMembers = await state.storage.getGroupMembers(group.id);
+  }
+}
+
+async function _sendGroupSystemMessage(contact, payload) {
+  const serverUrl = (await state.storage.getSetting('serverUrl')) || '';
+  if (!serverUrl) return;
+  const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
+  const counter = await state.storage.incrementSentCounter(contact.id);
+  const senderSignPub = contact.signPubKeyHex ? await SecurityManager.importSignPublicKeyHex(contact.signPubKeyHex) : null;
+  const inner = await SecurityManager.encryptMessageEphemeral(
+    JSON.stringify(payload), counter, recipientPubKey, contact.pubKeyHex, state.signKeypair.privateKey
+  );
+  const outerCiphertext = encodeInnerEnvelope(inner);
+  const recipientHash = await SecurityManager.getKeyHash(recipientPubKey);
+  await fetch(`${serverUrl}/api/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient_hash: recipientHash, sender_hash: state.keyHash, ciphertext: outerCiphertext, iv: OUTER_IV_PLACEHOLDER }),
+  });
+}
+
+function openCreateGroupModal() {
+  $id('create-group-name').value = '';
+  clearErr('create-group-error');
+  const list = $id('create-group-contacts');
+  list.innerHTML = state.contacts.map(c => `
+    <label class="member-check-item">
+      <input type="checkbox" value="${c.id}">
+      <span>${esc(c.name)}</span>
+    </label>
+  `).join('') || '<div style="color:#666;font-size:13px;padding:8px 0">No contacts yet — add contacts first.</div>';
+  openModal('modal-create-group');
+}
+
+async function doCreateGroup() {
+  const name = $id('create-group-name').value.trim();
+  clearErr('create-group-error');
+  if (!name) { showErr('create-group-error', 'Enter a group name.'); return; }
+
+  const checked = [...$id('create-group-contacts').querySelectorAll('input:checked')];
+  if (!checked.length) { showErr('create-group-error', 'Select at least one contact.'); return; }
+
+  const btn = $id('btn-confirm-create-group');
+  setLoading(btn, true, 'Creating…');
+  try {
+    // Generate group identity
+    const groupIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const groupIdHex = bytesToHex(groupIdBytes);
+    const groupKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const groupKeyHex = bytesToHex(groupKeyBytes);
+    const hashBuf = await crypto.subtle.digest('SHA-256', groupIdBytes);
+    const groupHashHex = bytesToHex(new Uint8Array(hashBuf));
+
+    const groupDbId = await state.storage.createGroup(name, groupIdHex, groupHashHex, groupKeyHex, true);
+    // Add myself
+    await state.storage.addGroupMember(groupDbId, 'You', state.ecdhPubKeyHex, state.signPubKeyHex);
+
+    // Build full member list (including myself)
+    const invitedContacts = checked.map(el => state.contacts.find(c => c.id === parseInt(el.value, 10))).filter(Boolean);
+    for (const c of invitedContacts) {
+      await state.storage.addGroupMember(groupDbId, c.name, c.pubKeyHex, c.signPubKeyHex || null);
+    }
+
+    const allMembers = await state.storage.getGroupMembers(groupDbId);
+    const memberPayload = allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
+
+    // Send invites
+    for (const c of invitedContacts) {
+      await _sendGroupSystemMessage(c, {
+        type: 'group-invite', group_id: groupIdHex, group_hash: groupHashHex,
+        group_key: groupKeyHex, group_name: name, i_am_admin: false, members: memberPayload,
+      });
+    }
+
+    closeModal('modal-create-group');
+    await refreshContacts();
+    showToast(`Group "${name}" created`, 'success');
+  } catch (e) {
+    showErr('create-group-error', 'Failed: ' + e.message);
+  } finally {
+    setLoading(btn, false, 'Create Group');
+  }
+}
+
+async function openGroupMembersModal(groupDbId) {
+  const group = state.groups.find(g => g.id === groupDbId) || await state.storage.getGroupByIdHex('');
+  const members = await state.storage.getGroupMembers(groupDbId);
+  const g = state.groups.find(g => g.id === groupDbId);
+
+  $id('group-members-title').textContent = g ? g.name : 'Group Members';
+
+  const list = $id('group-members-list');
+  list.innerHTML = members.map(m => {
+    const isMe = m.ecdhPubHex === state.ecdhPubKeyHex;
+    const removeBtn = (g?.isAdmin && !isMe)
+      ? `<button class="btn-remove-member" data-ecdh="${m.ecdhPubHex}">Remove</button>`
+      : '';
+    return `
+      <div class="member-item">
+        <span class="member-item-name">${esc(m.name)}${isMe ? ' <span class="member-item-admin">(you)</span>' : ''}</span>
+        ${removeBtn}
+      </div>`;
+  }).join('');
+
+  // Add member section (admin only)
+  const addSection = $id('group-add-member-section');
+  if (g?.isAdmin) {
+    addSection.classList.remove('hidden');
+    // Populate contacts not already in the group
+    const memberKeys = new Set(members.map(m => m.ecdhPubHex));
+    const eligible = state.contacts.filter(c => !memberKeys.has(c.pubKeyHex));
+    const sel = $id('group-add-member-select');
+    sel.innerHTML = eligible.length
+      ? eligible.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')
+      : '<option disabled>All contacts already in group</option>';
+    sel.disabled = !eligible.length;
+    $id('btn-add-group-member').disabled = !eligible.length;
+  } else {
+    addSection.classList.add('hidden');
+  }
+
+  // Wire remove buttons
+  list.querySelectorAll('.btn-remove-member').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ecdhHex = btn.dataset.ecdh;
+      if (confirm('Remove this member? This will rotate the group key.')) {
+        await doRemoveGroupMember(groupDbId, ecdhHex);
+        await openGroupMembersModal(groupDbId);
+      }
+    });
+  });
+
+  openModal('modal-group-members');
+}
+
+async function doAddGroupMember(groupDbId) {
+  const sel = $id('group-add-member-select');
+  const contactId = parseInt(sel.value, 10);
+  const contact = state.contacts.find(c => c.id === contactId);
+  if (!contact) return;
+
+  const btn = $id('btn-add-group-member');
+  setLoading(btn, true, 'Adding…');
+  try {
+    const group = state.groups.find(g => g.id === groupDbId);
+    if (!group) return;
+
+    // Rotate key
+    const newKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const newKeyHex = bytesToHex(newKeyBytes);
+
+    // Add new member to local DB
+    await state.storage.addGroupMember(groupDbId, contact.name, contact.pubKeyHex, contact.signPubKeyHex || null);
+    const allMembers = await state.storage.getGroupMembers(groupDbId);
+    const memberPayload = allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
+
+    // Update key locally
+    await state.storage.updateGroupKey(group.groupId, newKeyHex, allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex })));
+
+    // Send invite to new member
+    await _sendGroupSystemMessage(contact, {
+      type: 'group-invite', group_id: group.groupId, group_hash: group.groupHash,
+      group_key: newKeyHex, group_name: group.name, i_am_admin: false, members: memberPayload,
+    });
+
+    // Send key-update to existing members (everyone except the new member)
+    for (const m of allMembers) {
+      if (m.ecdhPubHex === state.ecdhPubKeyHex || m.ecdhPubHex === contact.pubKeyHex) continue;
+      const existingContact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+      if (existingContact) {
+        await _sendGroupSystemMessage(existingContact, {
+          type: 'group-key-update', group_id: group.groupId, group_key: newKeyHex, members: memberPayload,
+        });
+      }
+    }
+
+    await refreshContacts();
+    showToast(`${contact.name} added to group`, 'success');
+    await openGroupMembersModal(groupDbId);
+  } catch (e) {
+    showToast('Failed to add member: ' + e.message, 'error');
+  } finally {
+    setLoading(btn, false, 'Add');
+  }
+}
+
+async function doRemoveGroupMember(groupDbId, ecdhPubHex) {
+  const group = state.groups.find(g => g.id === groupDbId);
+  if (!group) return;
+
+  const newKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const newKeyHex = bytesToHex(newKeyBytes);
+
+  // Remove from DB and get remaining members
+  await state.storage.removeGroupMember(groupDbId, ecdhPubHex);
+  const remaining = await state.storage.getGroupMembers(groupDbId);
+  const memberPayload = remaining.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
+
+  // Update key locally
+  await state.storage.updateGroupKey(group.groupId, newKeyHex, memberPayload);
+
+  // Send key-update to remaining members (not myself)
+  for (const m of remaining) {
+    if (m.ecdhPubHex === state.ecdhPubKeyHex) continue;
+    const c = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+    if (c) {
+      await _sendGroupSystemMessage(c, {
+        type: 'group-key-update', group_id: group.groupId, group_key: newKeyHex, members: memberPayload,
+      });
+    }
+  }
+
+  await refreshContacts();
+  showToast('Member removed and key rotated', 'success');
 }
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
@@ -803,7 +1216,9 @@ function lockSession() {
   Object.assign(state, {
     masterKey: null, ecdhKeypair: null, signKeypair: null,
     ecdhPubKeyHex: null, signPubKeyHex: null, keyHash: null,
-    storage: null, contacts: [], activeContactId: null, syncTimer: null, syncRunning: false,
+    storage: null, contacts: [], groups: [],
+    activeContactId: null, activeGroupId: null, activeGroupMembers: null,
+    syncTimer: null, syncRunning: false,
   });
 
   closeModal('modal-settings');
@@ -915,6 +1330,18 @@ function wireEvents() {
   $id('link-mnemonic-import').addEventListener('click', () => showAuthSub('mnemonic'));
   $id('back-to-import-from-mnemonic').addEventListener('click', () => showAuthSub('import'));
   $id('btn-import-mnemonic').addEventListener('click', doImportFromMnemonic);
+
+  // Group create / members
+  $id('btn-create-group').addEventListener('click', openCreateGroupModal);
+  $id('btn-cancel-create-group').addEventListener('click', () => closeModal('modal-create-group'));
+  $id('btn-confirm-create-group').addEventListener('click', doCreateGroup);
+  $id('btn-group-members').addEventListener('click', () => {
+    if (state.activeGroupId !== null) openGroupMembersModal(state.activeGroupId);
+  });
+  $id('btn-close-group-members').addEventListener('click', () => closeModal('modal-group-members'));
+  $id('btn-add-group-member').addEventListener('click', () => {
+    if (state.activeGroupId !== null) doAddGroupMember(state.activeGroupId);
+  });
 
   // Chat settings / TTL
   $id('btn-ttl').addEventListener('click', openChatSettings);

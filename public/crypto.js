@@ -340,6 +340,59 @@ export class SecurityManager {
     return { ecdh, sign };
   }
 
+  // ─── Group encryption ────────────────────────────────────────────────────────
+
+  static async groupEncrypt(text, groupKeyHex, senderSignPriv, groupIdHex, senderHash) {
+    const aesKey = await crypto.subtle.importKey(
+      'raw', hexToBytes(groupKeyHex), { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+    );
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ivHex = bytesToHex(iv);
+
+    const sigInput = new TextEncoder().encode(ivHex + groupIdHex + senderHash + text);
+    const sigBuf = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, senderSignPriv, sigInput);
+
+    const inner = JSON.stringify({
+      type: 'group-msg', group_id: groupIdHex,
+      sender_hash: senderHash, text,
+      sig: bytesToHex(new Uint8Array(sigBuf)),
+      ts: Date.now(),
+    });
+
+    const plainBytes = new TextEncoder().encode(inner);
+    const plainLen = plainBytes.length;
+    const padded = new Uint8Array(4 + Math.ceil((plainLen + 4) / 256) * 256);
+    new DataView(padded.buffer).setUint32(0, plainLen, true);
+    padded.set(plainBytes, 4);
+    crypto.getRandomValues(padded.subarray(4 + plainLen));
+
+    const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, padded);
+    return { ciphertext: bytesToHex(new Uint8Array(ctBuf)), iv: ivHex };
+  }
+
+  static async groupDecrypt(ciphertext, iv, groupKeyHex) {
+    const aesKey = await crypto.subtle.importKey(
+      'raw', hexToBytes(groupKeyHex), { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    );
+    try {
+      const ptBuf = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: hexToBytes(iv) }, aesKey, hexToBytes(ciphertext)
+      );
+      const padded = new Uint8Array(ptBuf);
+      const msgLen = new DataView(padded.buffer).getUint32(0, true);
+      return JSON.parse(new TextDecoder().decode(padded.subarray(4, 4 + msgLen)));
+    } catch {
+      return null;
+    }
+  }
+
+  static async groupVerifySig(inner, iv, signPubKey) {
+    const sigInput = new TextEncoder().encode(iv + inner.group_id + inner.sender_hash + inner.text);
+    return crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, signPubKey, hexToBytes(inner.sig), sigInput
+    );
+  }
+
   static async encryptVault(data, masterKey) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ciphertextBuf = await crypto.subtle.encrypt(

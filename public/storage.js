@@ -74,6 +74,38 @@ export class StorageManager {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS groups (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id   TEXT NOT NULL UNIQUE,
+        group_hash TEXT NOT NULL UNIQUE,
+        group_key  TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        i_am_admin INTEGER NOT NULL DEFAULT 0,
+        last_sync  INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+
+      CREATE TABLE IF NOT EXISTS group_members (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        name         TEXT NOT NULL,
+        ecdh_pub_hex TEXT NOT NULL,
+        sign_pub_hex TEXT,
+        key_hash     TEXT,
+        added_at     INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+
+      CREATE TABLE IF NOT EXISTS group_messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        sender_hash TEXT NOT NULL,
+        text        TEXT NOT NULL,
+        sig_valid   INTEGER NOT NULL DEFAULT 0,
+        ts          INTEGER NOT NULL,
+        remote_id   TEXT UNIQUE,
+        status      TEXT NOT NULL DEFAULT 'unread'
+      );
     `);
 
     // Add ttl_seconds column to existing databases that predate this migration
@@ -271,6 +303,99 @@ export class StorageManager {
       'DELETE FROM messages WHERE contact_id = ? AND ts < ?',
       [contactId, cutoff]
     );
+    await this._persist();
+  }
+
+  // ─── Groups ─────────────────────────────────────────────────────────────────
+
+  async createGroup(name, groupIdHex, groupHashHex, groupKeyHex, isAdmin) {
+    this._db.run(
+      'INSERT INTO groups (group_id, group_hash, group_key, name, i_am_admin) VALUES (?, ?, ?, ?, ?)',
+      [groupIdHex, groupHashHex, groupKeyHex, name, isAdmin ? 1 : 0]
+    );
+    const id = this._db.exec('SELECT last_insert_rowid() as id')[0].values[0][0];
+    await this._persist();
+    return id;
+  }
+
+  async addGroupMember(groupDbId, name, ecdhPubHex, signPubHex) {
+    const pubBytes = hexToBytes(ecdhPubHex);
+    const hashBuf = await crypto.subtle.digest('SHA-256', pubBytes);
+    const keyHash = bytesToHex(new Uint8Array(hashBuf));
+    this._db.run(
+      'INSERT OR IGNORE INTO group_members (group_id, name, ecdh_pub_hex, sign_pub_hex, key_hash) VALUES (?, ?, ?, ?, ?)',
+      [groupDbId, name, ecdhPubHex, signPubHex || null, keyHash]
+    );
+    await this._persist();
+  }
+
+  async getGroupMembers(groupDbId) {
+    return this._query(
+      'SELECT id, name, ecdh_pub_hex as ecdhPubHex, sign_pub_hex as signPubHex, key_hash as keyHash FROM group_members WHERE group_id = ? ORDER BY added_at ASC',
+      [groupDbId]
+    );
+  }
+
+  async removeGroupMember(groupDbId, ecdhPubHex) {
+    this._db.run('DELETE FROM group_members WHERE group_id = ? AND ecdh_pub_hex = ?', [groupDbId, ecdhPubHex]);
+    await this._persist();
+  }
+
+  async updateGroupKey(groupIdHex, newGroupKeyHex, newMembers) {
+    const rows = this._query('SELECT id FROM groups WHERE group_id = ?', [groupIdHex]);
+    if (!rows.length) return;
+    const dbId = rows[0].id;
+    this._db.run('UPDATE groups SET group_key = ? WHERE id = ?', [newGroupKeyHex, dbId]);
+    this._db.run('DELETE FROM group_members WHERE group_id = ?', [dbId]);
+    for (const m of newMembers) await this.addGroupMember(dbId, m.name, m.ecdhPubHex, m.signPubHex);
+    await this._persist();
+  }
+
+  async getGroups() {
+    return this._query(`
+      SELECT
+        g.id, g.group_id as groupId, g.group_hash as groupHash,
+        g.group_key as groupKey, g.name, g.i_am_admin as isAdmin,
+        g.last_sync as lastSync, g.created_at as createdAt,
+        (SELECT text FROM group_messages WHERE group_id = g.id ORDER BY ts DESC LIMIT 1) as lastMessage,
+        (SELECT ts FROM group_messages WHERE group_id = g.id ORDER BY ts DESC LIMIT 1) as lastTs,
+        (SELECT COUNT(*) FROM group_messages WHERE group_id = g.id AND status = 'unread') as unread
+      FROM groups g
+      ORDER BY lastTs DESC NULLS LAST, g.created_at DESC
+    `);
+  }
+
+  async getGroupByIdHex(groupIdHex) {
+    const rows = this._query('SELECT id, group_id as groupId, group_hash as groupHash, group_key as groupKey, name, i_am_admin as isAdmin, last_sync as lastSync FROM groups WHERE group_id = ?', [groupIdHex]);
+    return rows.length ? rows[0] : null;
+  }
+
+  async addGroupMessage(groupDbId, senderHash, text, sigValid, ts, remoteId) {
+    const existing = this._query('SELECT id FROM group_messages WHERE remote_id = ?', [remoteId]);
+    if (existing.length) return 0;
+    this._db.run(
+      "INSERT OR IGNORE INTO group_messages (group_id, sender_hash, text, sig_valid, ts, remote_id, status) VALUES (?, ?, ?, ?, ?, ?, 'unread')",
+      [groupDbId, senderHash, text, sigValid ? 1 : 0, ts, remoteId]
+    );
+    const id = this._db.exec('SELECT last_insert_rowid() as id')[0].values[0][0];
+    await this._persist();
+    return id;
+  }
+
+  async getGroupMessages(groupDbId) {
+    return this._query(
+      'SELECT id, sender_hash as senderHash, text, sig_valid as sigValid, ts, status FROM group_messages WHERE group_id = ? ORDER BY ts ASC',
+      [groupDbId]
+    );
+  }
+
+  async setGroupSyncCursor(groupDbId, ts) {
+    this._db.run('UPDATE groups SET last_sync = ? WHERE id = ?', [ts, groupDbId]);
+    await this._persist();
+  }
+
+  async markGroupRead(groupDbId) {
+    this._db.run("UPDATE group_messages SET status = 'read' WHERE group_id = ? AND status = 'unread'", [groupDbId]);
     await this._persist();
   }
 

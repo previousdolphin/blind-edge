@@ -1093,6 +1093,97 @@
     }
 
     /* ------------------------------------------------------------------ */
+    /* Group chat + members modal                                          */
+    /* ------------------------------------------------------------------ */
+    .group-badge {
+      font-size: 10px;
+      color: #5b8dee;
+      border: 1px solid rgba(91, 141, 238, 0.4);
+      border-radius: 99px;
+      padding: 1px 6px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .group-sender {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 2px;
+      padding-left: 2px;
+    }
+
+    .member-check-item {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid #1a1a1a;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .member-check-item:last-child { border-bottom: none; }
+
+    .member-check-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #5b8dee;
+      flex-shrink: 0;
+    }
+
+    .create-group-contacts {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 8px;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 0 12px;
+    }
+
+    .member-list {
+      max-height: 220px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .member-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 13px;
+    }
+
+    .member-item:last-child { border-bottom: none; }
+
+    .member-item-admin { font-size: 11px; color: #5b8dee; margin-left: 4px; }
+
+    .btn-remove-member {
+      font-size: 11px;
+      color: #ef4444;
+      background: none;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 4px;
+      padding: 3px 8px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .btn-remove-member:hover { background: rgba(239,68,68,0.08); }
+
+    .group-add-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 4px;
+    }
+
+    .group-add-row select {
+      flex: 1;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Feature pills + about link                                          */
     /* ------------------------------------------------------------------ */
     .feature-pills {
@@ -1380,6 +1471,7 @@
         <span id="app-title">B.E.Chat</span>
         <div class="header-actions">
           <button id="btn-ttl" class="hidden" title="Message autodestruct">Timer</button>
+          <button id="btn-group-members" class="hidden" title="Group members">Members</button>
           <button id="btn-identity" title="Your Identity">Key</button>
           <button id="btn-settings" title="Settings">Set</button>
         </div>
@@ -1389,7 +1481,10 @@
       <div id="panel-contacts" class="panel active">
         <div class="panel-header">
           <span>Conversations</span>
-          <button id="btn-add-contact">+ Add</button>
+          <div style="display:flex;gap:6px">
+            <button id="btn-create-group">+ Group</button>
+            <button id="btn-add-contact">+ Add</button>
+          </div>
         </div>
         <div id="contact-list"></div>
         <div id="contact-empty" class="empty-state hidden">
@@ -1700,6 +1795,57 @@
         <div class="modal-actions">
           <button id="btn-confirm-seed" class="btn-danger" disabled>Reveal Words</button>
           <button id="btn-close-seed" class="btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Create Group                                                 -->
+    <!-- ================================================================ -->
+    <div id="modal-create-group" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <div class="modal-title">Create Group</div>
+
+        <div class="label">Group Name</div>
+        <input
+          type="text"
+          id="create-group-name"
+          placeholder="e.g. Team Chat"
+          autocomplete="off"
+          autocapitalize="words"
+        >
+
+        <div class="label">Invite Contacts</div>
+        <div id="create-group-contacts" class="create-group-contacts"></div>
+
+        <div id="create-group-error" class="error hidden"></div>
+
+        <div class="modal-actions">
+          <button id="btn-cancel-create-group" class="btn-secondary">Cancel</button>
+          <button id="btn-confirm-create-group" class="btn-primary">Create Group</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Group Members                                                -->
+    <!-- ================================================================ -->
+    <div id="modal-group-members" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <div class="modal-title" id="group-members-title">Group Members</div>
+
+        <div id="group-members-list" class="member-list"></div>
+
+        <div id="group-add-member-section" class="hidden">
+          <div class="label">Add Member</div>
+          <div class="group-add-row">
+            <select id="group-add-member-select"></select>
+            <button id="btn-add-group-member" class="btn-primary" style="flex-shrink:0">Add</button>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top:16px">
+          <button id="btn-close-group-members" class="btn-secondary">Close</button>
         </div>
       </div>
     </div>
