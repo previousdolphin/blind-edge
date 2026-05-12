@@ -1,14 +1,9 @@
 import { SecurityManager } from './crypto.js';
 import { StorageManager } from './storage.js';
+import { hexToBytes } from './hex.js';
 
 // Shared demo relay — works out of the box; replace with your own in Settings
 const DEMO_WORKER_URL = 'https://blind-edge-api.jdo-8af.workers.dev';
-
-function hexToBytes(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
 
 // Deterministic 5×5 symmetric identicon from any hex string (pubKeyHex or keyHash)
 function generateIdenticon(hex, size = 40) {

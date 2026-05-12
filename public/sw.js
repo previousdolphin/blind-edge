@@ -1,10 +1,11 @@
-const CACHE_NAME = 'blind-edge-v5';
+const CACHE_NAME = 'blind-edge-v6';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/app.js',
   '/crypto.js',
   '/storage.js',
+  '/hex.js',
   '/manifest.json',
   '/logo.svg'
 ];
