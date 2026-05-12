@@ -5,7 +5,7 @@
 > End-to-end encrypted, local-first messaging with a zero-knowledge relay.  
 > No accounts. No plaintext on the wire. Deployable in under 5 minutes.
 
-**Built entirely with [Claude Code](https://claude.ai/code) in a single session** as a live demonstration of AI-assisted full-stack development. The cryptographic core, local database, Cloudflare Worker API, and complete PWA were generated, wired together, debugged, and deployed without leaving the terminal.
+**Built entirely with [Claude Code](https://claude.ai/code) in a single session** as a live demonstration of AI-assisted full-stack development. The cryptographic core, local database, relay API, and complete PWA were generated, wired together, debugged, and deployed without leaving the terminal.
 
 **Try it now:** [blind-edge.pages.dev](https://blind-edge.pages.dev) — works immediately with the shared demo relay. No sign-up required.
 
@@ -15,7 +15,7 @@
 
 | Field | Server receives | Server can read |
 |---|---|---|
-| Message content | Hex ciphertext | **Nothing** |
+| Message content | Padded hex ciphertext | **Nothing** |
 | Sender | SHA-256 of their public key | A hash — no name, no identity |
 | Recipient | SHA-256 of their public key | A hash — no name, no identity |
 | Your password | Never transmitted | — |
@@ -30,40 +30,53 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 ## How encryption works
 
 ```
-  Alice's device                          Relay (Cloudflare Worker + D1)
-  ──────────────────                      ────────────────────────────────
+  Alice's device                          Blind Relay (any serverless host)
+  ──────────────────                      ──────────────────────────────────
   plaintext message
     │
-    ├─ ECDH(Alice.privKey, Bob.pubKey)
+    ├─ generate ephemeral ECDH keypair (per message)
+    │
+    ├─ ECDH(ephemeralPriv, Bob.ecdhPubKey)
     │  → 256-bit shared secret
     │
-    ├─ HKDF(secret, info="blind-edge-v1")
+    ├─ HKDF(secret, info="blind-edge-v2|sorted(ephPub, bobPub)")
     │  → AES-256-GCM key
     │
+    ├─ pad plaintext to 256-byte block boundary
+    │
+    ├─ AES-256-GCM encrypt {counter, plaintext}
+    │
+    ├─ ECDSA sign (ephPub ‖ iv ‖ ciphertext) with Alice.signKey
+    │
     ▼
-  { ciphertext, iv } ─── POST /api/send ─► stored as-is, unreadable
+  { ephPubHex, ciphertext, iv, signature } ── POST /api/send ──► stored as-is
 
   Bob's device
   ──────────────────
-  GET /api/sync?for=SHA256(Bob.pubKey) ◄── envelopes for Bob's hash
+  GET /api/sync?for=SHA256(Bob.ecdhPubKey) ◄── envelopes for Bob's hash
     │
-    ├─ ECDH(Bob.privKey, Alice.pubKey)
-    │  → same shared secret  (ECDH is commutative)
+    ├─ verify ECDSA signature against Alice.signPubKey
+    │
+    ├─ ECDH(Bob.ecdhPrivKey, ephemeralPubKey)
+    │  → same 256-bit shared secret
     │
     ├─ HKDF → same AES-256-GCM key
+    │
+    ├─ decrypt + unpad → verify counter > lastSeen (replay protection)
     │
     ▼
   plaintext ✓
 ```
 
-**Primitives used — all native [`window.crypto.subtle`](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto), zero libraries:**
+**Primitives — all native [`window.crypto.subtle`](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto), zero libraries:**
 
 | Primitive | Purpose |
 |---|---|
-| ECDH P-256 | Key agreement — shared secret from two keypairs |
-| HKDF SHA-256 | Key derivation — shared secret → AES key |
+| ECDH P-256 (ephemeral) | Per-message key agreement — sender-side forward secrecy |
+| ECDSA P-256 | Envelope signing — message authenticity |
+| HKDF SHA-256 | Key derivation — shared secret → AES key, bound to both public keys |
 | AES-256-GCM | Authenticated encryption of message content |
-| PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private key at rest |
+| PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private keys at rest |
 | SHA-256 | Public key → recipient hash (your "address") |
 
 ---
@@ -74,8 +87,8 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 |---|---|---|
 | Crypto | Web Crypto API (native) | No dependencies, no supply chain risk |
 | Local DB | sql.js + IndexedDB | SQLite in the browser, persistent across sessions |
-| Relay API | Cloudflare Workers | Edge-deployed, serverless, generous free tier |
-| Remote DB | Cloudflare D1 | Serverless SQLite, same free tier |
+| Relay API | Any serverless platform | ~100 lines of JS — runs anywhere |
+| Remote DB | Any SQLite-compatible store | One table, two columns indexed |
 | Frontend | Vanilla JS ES Modules | No bundler, no framework, instant load |
 | PWA | Service Worker + Web App Manifest | Installable, offline-capable |
 
@@ -93,13 +106,43 @@ The app ships pre-configured with a shared demo relay:
 4. Have them share their key string → tap **+ Add**, paste it, give them a name
 5. Start messaging
 
-> **Key format note:** The combined key string is ~262 characters (`130 hex + : + 130 hex`). Both parties need to share the full string for signature verification. Contacts added with only an ECDH key (130 chars, no colon) work in legacy mode — messages are encrypted but not signed.
+> **Key format:** The combined key string is ~262 characters (`130 hex + : + 130 hex`). Both parties need the full string for signature verification. A 130-char ECDH-only key also works in legacy mode — encrypted but not signed.
 
-The demo relay is operational but **shared** — use your own Worker for private production use.
+The demo relay is operational but **shared** — deploy your own for private production use.
 
 ---
 
-## Deploy your own — full walkthrough
+## Deploy your own
+
+The relay is ~100 lines of plain JavaScript implementing two routes (`POST /api/send`, `GET /api/sync`) against a single SQLite table. It runs on any platform that can execute JS and talk to a database. The frontend is a static folder — deployable to any static host.
+
+### Relay options
+
+| Platform | Notes |
+|---|---|
+| **Cloudflare Workers + D1** | Included (`worker/`). Free tier, edge-deployed, zero config beyond auth. |
+| **Deno Deploy** | Swap D1 for Deno KV or a Turso SQLite. No wrangler needed. |
+| **AWS Lambda + DynamoDB** | Replace D1 queries with DynamoDB SDK calls. |
+| **Fly.io / Railway / Render** | Run the worker as a Node.js HTTP server, SQLite on disk. |
+| **Any VPS** | Node/Bun + better-sqlite3 behind nginx. |
+
+### Frontend hosting options
+
+Any static host works — the `public/` folder has no build step.
+
+| Platform | Command |
+|---|---|
+| **Cloudflare Pages** | `npx wrangler pages deploy public --project-name blind-edge` |
+| **Netlify** | `netlify deploy --dir public --prod` |
+| **Vercel** | `vercel --prod public` |
+| **GitHub Pages** | Push `public/` to a `gh-pages` branch |
+| **Any CDN / S3** | Upload `public/` and point your domain at it |
+
+---
+
+## Cloudflare deployment — full walkthrough
+
+The `worker/` directory is a ready-to-deploy Cloudflare Workers implementation. If you prefer a different platform, use this as a reference for the relay API contract.
 
 ### Prerequisites
 
@@ -122,8 +165,6 @@ npx wrangler login
 
 This opens a browser window. Log in with your Cloudflare account. When prompted, grant **all** permissions (Workers, D1, Pages). The session is stored locally via `wrangler`.
 
-> **Apple Silicon / Mac:** Wrangler authenticates via browser — no API token needed for local dev.
-
 ### 3. Create the D1 database
 
 ```bash
@@ -142,8 +183,6 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   ← copy this
 
 ### 4. Paste the database ID into `worker/wrangler.toml`
 
-Open `worker/wrangler.toml` and replace the placeholder:
-
 ```toml
 [[d1_databases]]
 binding = "DB"
@@ -151,19 +190,11 @@ database_name = "blind-edge-db"
 database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # ← paste here
 ```
 
-### 5. Push the schema to the remote database
+### 5. Push the schema
 
 ```bash
 npm run db:init
 ```
-
-Expected output:
-```
-🌀 Executing on remote database blind-edge-db (...)
-🚣 Executed 2 queries in ~3ms (5 rows written)
-```
-
-This creates the `envelopes` table and its index. Run it once — it uses `CREATE TABLE IF NOT EXISTS` so it's safe to re-run.
 
 ### 6. Deploy the Worker
 
@@ -176,48 +207,62 @@ Expected output:
 Uploaded blind-edge-api (1.69 sec)
 Deployed blind-edge-api triggers (0.77 sec)
   https://blind-edge-api.YOUR-SUBDOMAIN.workers.dev   ← note this URL
+  schedule: 0 */6 * * *
 ```
 
-Your Worker is now live. The URL format is always `https://blind-edge-api.ACCOUNT-SUBDOMAIN.workers.dev`.
-
-### 7. Update the allowed origins in `worker/wrangler.toml`
-
-Open `worker/wrangler.toml` and update `ALLOWED_ORIGINS` with your Pages domain once you know it (after step 9):
+### 7. Update allowed origins in `worker/wrangler.toml`
 
 ```toml
 [vars]
 ALLOWED_ORIGINS = "http://localhost:8080,https://YOUR-PROJECT.pages.dev"
 ```
 
-Then redeploy the worker: `npm run worker:deploy`
+Then redeploy: `npm run worker:deploy`
 
 ### 8. Update the default relay URL in `public/app.js`
-
-Open `public/app.js` and replace the demo URL with your own:
 
 ```js
 const DEMO_WORKER_URL = 'https://blind-edge-api.YOUR-SUBDOMAIN.workers.dev';
 ```
 
-### 9. Deploy the frontend to Cloudflare Pages
+### 9. Deploy the frontend
 
 ```bash
-# First time — create the Pages project
+# First time only
 npx wrangler pages project create blind-edge --production-branch main
 
-# Deploy the public/ folder
+# Deploy
 npx wrangler pages deploy public --project-name blind-edge
-```
-
-Expected output:
-```
-✨ Deployment complete!
-  https://blind-edge.pages.dev
 ```
 
 ### 10. Test it
 
-Open your Pages URL in two different browsers (or two devices). Create an identity on each, exchange public keys, add each other as contacts, and send a message. It should arrive within 15 seconds (the default sync interval).
+Open your Pages URL in two different browsers. Create an identity on each, exchange public keys, add each other as contacts, and send a message. It should arrive within 15 seconds (the default sync interval).
+
+---
+
+## Relay API contract
+
+Any replacement relay must implement these two routes. The `worker/index.js` is the reference implementation.
+
+**`POST /api/send`**
+
+```json
+{
+  "recipient_hash": "<64-char hex SHA-256>",
+  "sender_hash":    "<64-char hex SHA-256>",
+  "ciphertext":     "<hex, max 131072 chars>",
+  "iv":             "<24-char hex>"
+}
+```
+
+Returns `201 { ok: true, id: <rowId> }` or a 4xx error.
+
+**`GET /api/sync?for=<recipientHash>&since=<timestampMs>`**
+
+Returns `200 { envelopes: [{ id, senderHash, ciphertext, iv, createdAt }] }`.
+
+The relay must return CORS headers for browser clients. It needs no auth, no user table, and no knowledge of message content.
 
 ---
 
@@ -227,34 +272,32 @@ Open your Pages URL in two different browsers (or two devices). Create an identi
 # Serve the frontend on localhost:8080
 npm run dev
 
-# In a second terminal — run the Worker locally against the remote D1
+# In a second terminal — run the Worker locally (Cloudflare)
 cd worker && npx wrangler dev --remote
 
 # The local Worker runs at http://localhost:8787
 # In the app, go to Settings → Worker URL → http://localhost:8787
 ```
 
-> The Worker **must** use `--remote` to access the real D1 database. Without it, it runs against a local SQLite file and messages won't sync between devices.
-
 ---
 
-## `worker/wrangler.toml` — full reference
+## `worker/wrangler.toml` — reference
 
 ```toml
 name = "blind-edge-api"
 main = "index.js"
 compatibility_date = "2024-12-01"
 
+[triggers]
+crons = ["0 */6 * * *"]   # prune envelopes older than 24h every 6 hours
+
 [[d1_databases]]
 binding = "DB"
 database_name = "blind-edge-db"
-database_id = "YOUR-DATABASE-ID"    # from: npm run db:create
+database_id = "YOUR-DATABASE-ID"
 
 [vars]
-# Comma-separated list of allowed frontend origins (no trailing slash)
 ALLOWED_ORIGINS = "http://localhost:8080,https://YOUR-PROJECT.pages.dev"
-
-# Maximum ciphertext hex length (~64KB default)
 MAX_CIPHERTEXT_LENGTH = "131072"
 ```
 
@@ -265,23 +308,25 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 - **Zero-knowledge relay** — server stores and forwards ciphertext it cannot read
 - **Local-first** — messages written to local IndexedDB instantly; works offline
 - **No accounts** — identity is a browser-generated keypair locked with your App Password
+- **Sender-side forward secrecy** — per-message ephemeral ECDH; past messages safe if long-term key leaks
+- **Signed envelopes** — ECDSA signature over ephemeral key + ciphertext; tampered messages rejected before decryption
+- **Replay protection** — monotonic counter inside every ciphertext; out-of-order or replayed messages dropped
+- **Message padding** — all payloads padded to 256-byte blocks; ciphertext length reveals nothing about message length
 - **Message autodestruct** — per-conversation TTL (1h / 12h / 24h / 7 days) prunes locally on schedule
+- **Server-side envelope TTL** — relay prunes envelopes older than 24 hours on a schedule; no unbounded accumulation
+- **IP rate limiting** — relay enforces 30 sends/min and 180 syncs/min per IP
 - **Identity portability** — export/import your encrypted key bundle to move between devices
-- **Secure export flow** — key export requires explicit checkbox confirmation with a detailed risk warning
+- **Secure export flow** — key export requires explicit checkbox confirmation with a risk warning
 - **Installable PWA** — add to home screen on iOS/Android/desktop
-- **Pending retry** — outgoing messages marked `pending` are retried on every sync cycle
-- **Message padding** — all payloads padded to 256-byte blocks before encryption; ciphertext length reveals nothing about message length
-- **Server-side envelope TTL** — Cloudflare Cron Trigger prunes envelopes older than 24 hours every 6 hours; relay never accumulates ciphertext indefinitely
-- **IP rate limiting** — Worker enforces 30 sends/min and 180 syncs/min per IP to resist relay flooding
-- **Identicons** — contacts and your own identity display a deterministic pixel-art avatar derived from the public key, making out-of-band key verification faster and less error-prone than comparing raw hex
+- **Identicons** — deterministic pixel-art avatars from public keys for fast out-of-band verification
 
 ---
 
 ## Limitations (by design)
 
 - **Text only** — no image/file transfer
-- **No forward secrecy** — ECDH keys are static per identity; a future version could layer a Double Ratchet on top
-- **Manual key exchange** — contacts are added by sharing public key hex out-of-band; no discovery server
+- **Sender-side PFS only** — ephemeral ECDH protects the sender's past messages; full bidirectional PFS (à la Signal's Double Ratchet) would require prekey bundles published by the recipient
+- **Manual key exchange** — contacts are added by sharing a public key string out-of-band; no discovery server
 - **No group messaging** — strictly pairwise conversations
 - **Local history only** — message history does not sync between devices; only new messages arrive after import
 - **Shared relay** — the demo relay is shared infrastructure; run your own for production privacy
@@ -296,15 +341,18 @@ blind-edge/
 │   ├── index.html       # App shell + all CSS
 │   ├── app.js           # Orchestration, sync engine, UI
 │   ├── crypto.js        # SecurityManager — all WebCrypto operations
+│   ├── hex.js           # Shared hex encoding with strict validation
 │   ├── storage.js       # StorageManager — sql.js + IndexedDB
 │   ├── sw.js            # Service worker (PWA caching)
 │   ├── logo.svg         # B.E.Chat logo
 │   └── manifest.json    # PWA manifest
-├── worker/              # Cloudflare Worker — blind relay
-│   ├── index.js         # POST /api/send  GET /api/sync
-│   ├── schema.sql       # D1 schema
-│   └── wrangler.toml    # Deployment config
-└── package.json         # Scripts: dev, db:create, db:init, worker:deploy
+├── worker/              # Reference relay — Cloudflare Workers + D1
+│   ├── index.js         # POST /api/send  GET /api/sync  scheduled cleanup
+│   ├── schema.sql       # D1 schema (portable SQLite)
+│   └── wrangler.toml    # Cloudflare deployment config
+├── test/
+│   └── crypto.test.mjs  # 18 automated crypto tests (npm test)
+└── package.json
 ```
 
 ---
@@ -314,25 +362,25 @@ blind-edge/
 | Script | What it does |
 |---|---|
 | `npm run dev` | Serve `public/` on `localhost:8080` |
-| `npm run db:create` | Create a new Cloudflare D1 database named `blind-edge-db` |
-| `npm run db:init` | Push `worker/schema.sql` to the remote D1 database |
-| `npm run worker:dev` | Run the Worker locally (use `--remote` flag for real D1) |
-| `npm run worker:deploy` | Deploy the Worker to Cloudflare's edge |
+| `npm test` | Run 18 automated crypto tests via node:test |
+| `npm run db:create` | *(Cloudflare)* Create a D1 database named `blind-edge-db` |
+| `npm run db:init` | *(Cloudflare)* Push `worker/schema.sql` to the remote D1 database |
+| `npm run worker:dev` | *(Cloudflare)* Run the Worker locally |
+| `npm run worker:deploy` | *(Cloudflare)* Deploy the Worker to the edge |
 
 ---
 
 ## What Claude built in one session
 
-This entire project was generated by [Claude Code](https://claude.ai/code) from a natural-language specification. The session covered:
+This entire project was generated by [Claude Code](https://claude.ai/code) from a natural-language specification — then iteratively hardened across follow-up sessions. The work covered:
 
-- Full cryptographic layer (PBKDF2, ECDH, HKDF, AES-GCM, SHA-256) using only the native Web Crypto API
-- Local SQLite via sql.js WASM with IndexedDB persistence (cross-browser compatible)
-- Cloudflare Worker with D1 — parameterized queries, CORS validation, hex/hash input sanitization
+- Full cryptographic protocol: PBKDF2 vault, ECDH, ECDHE (per-message ephemeral keys), ECDSA signing, HKDF key binding, AES-256-GCM, monotonic replay counters, 256-byte message padding — all native Web Crypto API, zero libraries
+- Local SQLite via sql.js WASM with IndexedDB persistence (cross-browser, including Safari)
+- Reference relay implementation on Cloudflare Workers + D1 with parameterized queries, CORS validation, rate limiting, and scheduled TTL pruning
 - PWA manifest and service worker with cache-first shell + network-first API strategy
-- Complete UI: auth flows, contact management, live chat, settings, modals, toast notifications
-- Cloudflare D1 database creation, schema migration, and Worker deployment via wrangler CLI
-- Cloudflare Pages deployment for the static frontend
-- Security hardening: identity export warning with checkbox confirmation, per-conversation autodestruct
+- Complete UI: auth flows, contact management, live chat, settings, modals, toast notifications, identicons
+- Security hardening: identity export warning, per-conversation autodestruct, v1→v2 identity migration
+- 18-test automated suite via node:test
 - B.E.Chat branding: SVG logo with chrome bubble letters and blindfolded hero
 
 ---
