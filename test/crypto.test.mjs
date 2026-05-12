@@ -10,6 +10,14 @@ async function makeIdentity() {
   return { kp, pubHex };
 }
 
+async function makeFullIdentity() {
+  const ecdh = await SecurityManager.generateIdentity();
+  const sign = await SecurityManager.generateSigningIdentity();
+  const ecdhPubHex = await SecurityManager.exportPublicKeyHex(ecdh.publicKey);
+  const signPubHex = await SecurityManager.exportSignPublicKeyHex(sign.publicKey);
+  return { ecdh, sign, ecdhPubHex, signPubHex };
+}
+
 test('HKDF info string is symmetric: sender and receiver derive matching keys', async () => {
   const alice = await makeIdentity();
   const bob = await makeIdentity();
@@ -123,6 +131,124 @@ test('node 20+ exposes ECDSA P-256 in globalThis.crypto.subtle', async () => {
   );
   assert.equal(pair.privateKey.algorithm.name, 'ECDSA');
   assert.equal(pair.privateKey.algorithm.namedCurve, 'P-256');
+});
+
+test('ephemeral envelope: signed round-trip', async () => {
+  const alice = await makeFullIdentity();
+  const bob = await makeFullIdentity();
+
+  const env = await SecurityManager.encryptMessageEphemeral(
+    'hi bob', 1, bob.ecdh.publicKey, bob.ecdhPubHex, alice.sign.privateKey
+  );
+  const out = await SecurityManager.decryptMessageEphemeral(
+    env, bob.ecdh.privateKey, bob.ecdhPubHex, alice.sign.publicKey
+  );
+  assert.equal(out.counter, 1);
+  assert.equal(out.plaintext, 'hi bob');
+});
+
+test('ephemeral envelope: tampered ciphertext fails signature before decrypt', async () => {
+  const alice = await makeFullIdentity();
+  const bob = await makeFullIdentity();
+
+  const env = await SecurityManager.encryptMessageEphemeral(
+    'hi bob', 1, bob.ecdh.publicKey, bob.ecdhPubHex, alice.sign.privateKey
+  );
+  // Flip one hex byte in ciphertext
+  const tampered = { ...env, ciphertext: env.ciphertext.slice(0, -2) + (env.ciphertext.slice(-2) === 'ff' ? '00' : 'ff') };
+  await assert.rejects(
+    () => SecurityManager.decryptMessageEphemeral(
+      tampered, bob.ecdh.privateKey, bob.ecdhPubHex, alice.sign.publicKey
+    ),
+    /Signature verification failed/
+  );
+});
+
+test('ephemeral envelope: tampered signature is rejected', async () => {
+  const alice = await makeFullIdentity();
+  const bob = await makeFullIdentity();
+
+  const env = await SecurityManager.encryptMessageEphemeral(
+    'hi bob', 1, bob.ecdh.publicKey, bob.ecdhPubHex, alice.sign.privateKey
+  );
+  const tampered = {
+    ...env,
+    signature: env.signature.slice(0, -2) + (env.signature.slice(-2) === 'ff' ? '00' : 'ff'),
+  };
+  await assert.rejects(
+    () => SecurityManager.decryptMessageEphemeral(
+      tampered, bob.ecdh.privateKey, bob.ecdhPubHex, alice.sign.publicKey
+    ),
+    /Signature verification failed/
+  );
+});
+
+test('ephemeral envelope: legacy contact (null sign key) skips verification', async () => {
+  const alice = await makeFullIdentity();
+  const bob = await makeFullIdentity();
+
+  const env = await SecurityManager.encryptMessageEphemeral(
+    'hi bob', 1, bob.ecdh.publicKey, bob.ecdhPubHex, alice.sign.privateKey
+  );
+  const out = await SecurityManager.decryptMessageEphemeral(
+    env, bob.ecdh.privateKey, bob.ecdhPubHex, null
+  );
+  assert.equal(out.plaintext, 'hi bob');
+});
+
+test('identity bundle v2 round-trip', async () => {
+  const password = 'correct horse battery staple';
+  const salt = SecurityManager.generateSalt();
+  const masterKey = await SecurityManager.deriveKey(password, salt);
+
+  const ecdh = await SecurityManager.generateIdentity();
+  const sign = await SecurityManager.generateSigningIdentity();
+  const bundle = await SecurityManager.exportIdentityBundle(ecdh, sign, masterKey, salt);
+  const imported = await SecurityManager.importIdentityBundle(bundle, masterKey);
+
+  assert.equal(imported.migratedFromV1, false);
+  assert.equal(
+    await SecurityManager.exportPublicKeyHex(imported.ecdh.publicKey),
+    await SecurityManager.exportPublicKeyHex(ecdh.publicKey)
+  );
+  assert.equal(
+    await SecurityManager.exportSignPublicKeyHex(imported.sign.publicKey),
+    await SecurityManager.exportSignPublicKeyHex(sign.publicKey)
+  );
+});
+
+test('identity bundle v1 → v2 migration mints fresh signing key', async () => {
+  // Build a v1 bundle by hand using the legacy schema.
+  const password = 'hunter2';
+  const salt = SecurityManager.generateSalt();
+  const masterKey = await SecurityManager.deriveKey(password, salt);
+
+  const ecdh = await SecurityManager.generateIdentity();
+  const jwk = await crypto.subtle.exportKey('jwk', ecdh.privateKey);
+  const encryptedPrivateKey = await SecurityManager.encryptVault(jwk, masterKey);
+  const publicKeyHex = await SecurityManager.exportPublicKeyHex(ecdh.publicKey);
+  const v1Bundle = JSON.stringify({
+    version: 1,
+    publicKeyHex,
+    encryptedPrivateKey,
+    salt: bytesToHex(salt),
+  });
+
+  const imported = await SecurityManager.importIdentityBundle(v1Bundle, masterKey);
+  assert.equal(imported.migratedFromV1, true);
+  assert.equal(
+    await SecurityManager.exportPublicKeyHex(imported.ecdh.publicKey),
+    publicKeyHex
+  );
+  // Confirm the fresh signing key actually works end-to-end.
+  const bob = await makeFullIdentity();
+  const env = await SecurityManager.encryptMessageEphemeral(
+    'after migration', 1, bob.ecdh.publicKey, bob.ecdhPubHex, imported.sign.privateKey
+  );
+  const out = await SecurityManager.decryptMessageEphemeral(
+    env, bob.ecdh.privateKey, bob.ecdhPubHex, imported.sign.publicKey
+  );
+  assert.equal(out.plaintext, 'after migration');
 });
 
 test('node 20+ exposes ECDH P-256 + HKDF in globalThis.crypto.subtle', async () => {

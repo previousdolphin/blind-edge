@@ -52,6 +52,33 @@ export class SecurityManager {
     return bytesToHex(new Uint8Array(digest));
   }
 
+  // Long-term identity signing key (ECDSA P-256). Web Crypto requires this
+  // be a separate key from the ECDH keypair because key usages can't overlap.
+  // Ed25519 would be a more modern choice but is not yet ubiquitous in
+  // Web Crypto across the no-polyfill browser target.
+  static async generateSigningIdentity() {
+    return crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+  }
+
+  static async exportSignPublicKeyHex(publicKey) {
+    const raw = await crypto.subtle.exportKey('raw', publicKey);
+    return bytesToHex(new Uint8Array(raw));
+  }
+
+  static async importSignPublicKeyHex(hex) {
+    return crypto.subtle.importKey(
+      'raw',
+      hexToBytes(hex),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['verify']
+    );
+  }
+
   static async _deriveSharedAesKey(theirPublicKey, ourPrivateKey, theirPubKeyHex, ourPubKeyHex) {
     // WebCrypto ECDH can't directly derive AES-GCM in one step when the
     // intermediate needs to feed into HKDF, so we derive raw bits first.
@@ -151,6 +178,121 @@ export class SecurityManager {
     }
   }
 
+  // Per-message ephemeral ECDH (ECDHE) with sender-signed ephemeral public.
+  // Provides forward secrecy on the sender side once the ephemeral private is
+  // garbage-collected. Full bidirectional PFS would require an X3DH-style
+  // prekey bundle published by the recipient — out of scope for this version.
+  static async encryptMessageEphemeral(plaintext, counter, recipientEcdhPub, recipientEcdhPubHex, senderSignPriv) {
+    const eph = await crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveBits']
+    );
+    const ephPubHex = await SecurityManager.exportPublicKeyHex(eph.publicKey);
+
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: recipientEcdhPub },
+      eph.privateKey,
+      256
+    );
+    const hkdfKey = await crypto.subtle.importKey(
+      'raw', sharedBits, 'HKDF', false, ['deriveKey']
+    );
+    const sortedPubs = [ephPubHex, recipientEcdhPubHex].sort();
+    const info = new TextEncoder().encode('blind-edge-v2|' + sortedPubs.join('|'));
+    const aesKey = await crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const wrapped = JSON.stringify({ v: 2, c: counter, m: plaintext });
+    const msgBytes = new TextEncoder().encode(wrapped);
+    const msgLen = msgBytes.length;
+    const padded = new Uint8Array(4 + Math.ceil((msgLen + 4) / 256) * 256);
+    new DataView(padded.buffer).setUint32(0, msgLen, true);
+    padded.set(msgBytes, 4);
+    crypto.getRandomValues(padded.subarray(4 + msgLen));
+
+    const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, padded);
+    const ctBytes = new Uint8Array(ctBuf);
+
+    // Sign ephPub || iv || ciphertext so the signature also binds the body of
+    // the message — flipping any of them invalidates the signature.
+    const ephPubBytes = hexToBytes(ephPubHex);
+    const sigInput = new Uint8Array(ephPubBytes.length + iv.length + ctBytes.length);
+    sigInput.set(ephPubBytes, 0);
+    sigInput.set(iv, ephPubBytes.length);
+    sigInput.set(ctBytes, ephPubBytes.length + iv.length);
+    const sigBuf = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      senderSignPriv,
+      sigInput
+    );
+
+    return {
+      ephPubHex,
+      ciphertext: bytesToHex(ctBytes),
+      iv: bytesToHex(iv),
+      signature: bytesToHex(new Uint8Array(sigBuf)),
+    };
+  }
+
+  static async decryptMessageEphemeral(envelope, recipientEcdhPriv, recipientEcdhPubHex, senderSignPub) {
+    const { ephPubHex, ciphertext, iv, signature } = envelope;
+
+    // Verify signature first when available — fails fast on tampered or
+    // forged envelopes before we touch the AES-GCM machinery. senderSignPub
+    // is null for legacy contacts that have no signing key on file.
+    if (senderSignPub) {
+      const sigInput = new Uint8Array([
+        ...hexToBytes(ephPubHex),
+        ...hexToBytes(iv),
+        ...hexToBytes(ciphertext),
+      ]);
+      const ok = await crypto.subtle.verify(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        senderSignPub,
+        hexToBytes(signature),
+        sigInput
+      );
+      if (!ok) throw new Error('Signature verification failed');
+    }
+
+    const ephPub = await SecurityManager.importPublicKeyHex(ephPubHex);
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: ephPub },
+      recipientEcdhPriv,
+      256
+    );
+    const hkdfKey = await crypto.subtle.importKey(
+      'raw', sharedBits, 'HKDF', false, ['deriveKey']
+    );
+    const sortedPubs = [ephPubHex, recipientEcdhPubHex].sort();
+    const info = new TextEncoder().encode('blind-edge-v2|' + sortedPubs.join('|'));
+    const aesKey = await crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+
+    const ptBuf = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: hexToBytes(iv) },
+      aesKey,
+      hexToBytes(ciphertext)
+    );
+    const padded = new Uint8Array(ptBuf);
+    const msgLen = new DataView(padded.buffer).getUint32(0, true);
+    const text = new TextDecoder().decode(padded.subarray(4, 4 + msgLen));
+    const inner = JSON.parse(text);
+    return { counter: inner.c, plaintext: inner.m };
+  }
+
   static async encryptVault(data, masterKey) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ciphertextBuf = await crypto.subtle.encrypt(
@@ -174,15 +316,24 @@ export class SecurityManager {
     return JSON.parse(new TextDecoder().decode(plaintextBuf));
   }
 
-  static async exportIdentityBundle(keypair, masterKey, salt) {
-    const jwk = await crypto.subtle.exportKey('jwk', keypair.privateKey);
-    const encryptedPrivateKey = await SecurityManager.encryptVault(jwk, masterKey);
-    const publicKeyHex = await SecurityManager.exportPublicKeyHex(keypair.publicKey);
+  // Identity bundle v2: holds both the ECDH (encryption) and ECDSA (signing)
+  // long-term keypairs. The two private keys are wrapped together under the
+  // password-derived master key.
+  static async exportIdentityBundle(ecdhKeypair, signKeypair, masterKey, salt) {
+    const ecdhJwk = await crypto.subtle.exportKey('jwk', ecdhKeypair.privateKey);
+    const signJwk = await crypto.subtle.exportKey('jwk', signKeypair.privateKey);
+    const encryptedPrivateKeys = await SecurityManager.encryptVault(
+      { ecdhPriv: ecdhJwk, signPriv: signJwk },
+      masterKey
+    );
+    const ecdhPubHex = await SecurityManager.exportPublicKeyHex(ecdhKeypair.publicKey);
+    const signPubHex = await SecurityManager.exportSignPublicKeyHex(signKeypair.publicKey);
 
     return JSON.stringify({
-      version: 1,
-      publicKeyHex,
-      encryptedPrivateKey,
+      version: 2,
+      ecdhPubHex,
+      signPubHex,
+      encryptedPrivateKeys,
       salt: bytesToHex(salt),
     });
   }
@@ -190,27 +341,52 @@ export class SecurityManager {
   static async importIdentityBundle(json, masterKey) {
     const parsed = JSON.parse(json);
 
-    if (parsed.version !== 1) {
+    if (parsed.version === 1) {
+      // v1 → v2 migration: decrypt the single ECDH JWK, mint a fresh ECDSA
+      // signing keypair, and signal the caller to re-export and overwrite the
+      // bundle in localStorage. The ECDH key (and therefore the server-facing
+      // key hash) is preserved across the migration.
+      const jwk = await SecurityManager.decryptVault(
+        parsed.encryptedPrivateKey.ciphertext,
+        parsed.encryptedPrivateKey.iv,
+        masterKey
+      );
+      const ecdhPriv = await crypto.subtle.importKey(
+        'jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
+      );
+      const ecdhPub = await SecurityManager.importPublicKeyHex(parsed.publicKeyHex);
+      const sign = await SecurityManager.generateSigningIdentity();
+      return {
+        ecdh: { publicKey: ecdhPub, privateKey: ecdhPriv },
+        sign,
+        salt: hexToBytes(parsed.salt),
+        migratedFromV1: true,
+      };
+    }
+
+    if (parsed.version !== 2) {
       throw new Error(`Unsupported bundle version: ${parsed.version}`);
     }
 
-    const jwk = await SecurityManager.decryptVault(
-      parsed.encryptedPrivateKey.ciphertext,
-      parsed.encryptedPrivateKey.iv,
+    const { ecdhPriv, signPriv } = await SecurityManager.decryptVault(
+      parsed.encryptedPrivateKeys.ciphertext,
+      parsed.encryptedPrivateKeys.iv,
       masterKey
     );
-
-    const privateKey = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'ECDH', namedCurve: 'P-256' },
-      true,
-      ['deriveKey', 'deriveBits']
+    const ecdhPrivateKey = await crypto.subtle.importKey(
+      'jwk', ecdhPriv, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
     );
+    const signPrivateKey = await crypto.subtle.importKey(
+      'jwk', signPriv, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']
+    );
+    const ecdhPublicKey = await SecurityManager.importPublicKeyHex(parsed.ecdhPubHex);
+    const signPublicKey = await SecurityManager.importSignPublicKeyHex(parsed.signPubHex);
 
-    const publicKey = await SecurityManager.importPublicKeyHex(parsed.publicKeyHex);
-    const salt = hexToBytes(parsed.salt);
-
-    return { publicKey, privateKey, salt };
+    return {
+      ecdh: { publicKey: ecdhPublicKey, privateKey: ecdhPrivateKey },
+      sign: { publicKey: signPublicKey, privateKey: signPrivateKey },
+      salt: hexToBytes(parsed.salt),
+      migratedFromV1: false,
+    };
   }
 }
