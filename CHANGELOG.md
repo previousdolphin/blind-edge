@@ -4,7 +4,38 @@ All notable changes to B.E.Chat are documented here.
 
 ---
 
-## v1.1.0 — 2025-05-11 Security & UX hardening
+## v1.2.0 — 2026-05-12 Cryptographic protocol upgrade
+
+### Security — Cryptography
+
+**HKDF key-binding fix (reflection attack)**
+The original protocol derived the same shared AES key for both Alice→Bob and Bob→Alice messages — a reflection attack where either party could decrypt the other's outbound ciphertext. Fixed by binding the HKDF `info` string to `blind-edge-v1|sorted(ecdhPubA, ecdhPubB)`. Both sides independently compute the same info regardless of role, producing a unique per-pair key.
+
+**Monotonic replay counter**
+A strictly-monotonic counter `c` is now embedded inside every AES-GCM ciphertext. The relay cannot observe or tamper with it. Each client tracks the last-seen counter per contact and silently drops any message with `counter ≤ lastSeen`, blocking replay and reorder attacks. Legacy ciphertexts (no counter) are accepted once with a warning and never advance the counter.
+
+**Per-message ephemeral ECDH (ECDHE) — sender-side forward secrecy**
+Every outgoing message generates a fresh P-256 ephemeral keypair. The recipient decrypts using ECDH between their static key and the message's ephemeral public key. Once the JS engine garbage-collects the ephemeral private key, past ciphertexts cannot be decrypted even if the sender's long-term key is later compromised. Full bidirectional PFS would require X3DH-style prekey bundles; this provides sender-side PFS with no server changes.
+
+**ECDSA envelope signing**
+Each ephemeral envelope is signed with the sender's long-term ECDSA P-256 key over `ephPub ‖ iv ‖ ciphertext`, binding the signature to the entire message body. Verification happens before decryption (fail-fast on forgery). Legacy contacts without a signing key on file skip verification gracefully.
+
+**Identity bundle v2**
+Identities now hold two long-term keypairs: ECDH (encryption) and ECDSA (signing), encrypted together under the vault key. v1 bundles are migrated transparently on next unlock — the ECDH key (and therefore your address) is preserved, a fresh signing key is minted, and the upgraded bundle is persisted automatically.
+
+### Key format change
+
+The public key string shared out-of-band is now `ecdhKey:signingKey` (~262 chars). Contacts added with only a legacy ECDH key (130 chars) continue to work in compatibility mode — encrypted but without signature verification.
+
+### Developer
+
+**Test suite** — 18 automated tests via `node:test` covering HKDF binding, counter semantics, tamper detection, legacy compatibility, hex validation, ephemeral round-trips, and bundle migration. Run with `npm test`.
+
+**`hex.js` utility** — `hexToBytes`/`bytesToHex` extracted to a shared module with strict type, charset, and length validation.
+
+---
+
+## v1.1.0 — 2026-05-11 Security & UX hardening
 
 ### Security — Cryptography
 
