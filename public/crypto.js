@@ -1,5 +1,22 @@
 import { hexToBytes, bytesToHex } from './hex.js';
 
+// PKCS8 DER prefix for a P-256 private key (RFC 5958 / SEC 1).
+// Structure: PrivateKeyInfo { version=0, ecPublicKey OID, P-256 OID, ECPrivateKey { version=1, privateKey=<32 bytes> } }
+// The 32-byte private scalar is appended directly after this prefix.
+const P256_PKCS8_PREFIX = new Uint8Array([
+  0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07,
+  0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+  0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04,
+  0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20,
+]);
+
+function buildP256PKCS8(scalar32) {
+  const der = new Uint8Array(P256_PKCS8_PREFIX.length + 32);
+  der.set(P256_PKCS8_PREFIX);
+  der.set(scalar32.slice(0, 32), P256_PKCS8_PREFIX.length);
+  return der.buffer;
+}
+
 export class SecurityManager {
   static generateSalt() {
     return crypto.getRandomValues(new Uint8Array(16));
@@ -291,6 +308,36 @@ export class SecurityManager {
     const text = new TextDecoder().decode(padded.subarray(4, 4 + msgLen));
     const inner = JSON.parse(text);
     return { counter: inner.c, plaintext: inner.m };
+  }
+
+  // Derive a deterministic identity from a BIP39 seed (64 bytes from mnemonicToSeed).
+  // HKDF expands the seed into two distinct 32-byte scalars, one per keypair.
+  // PKCS8 DER import lets Web Crypto compute public key coordinates internally;
+  // we then extract x/y from the JWK export to build the usable public key object.
+  static async deriveIdentityFromSeed(seed64) {
+    const hkdfKey = await crypto.subtle.importKey('raw', seed64, 'HKDF', false, ['deriveBits']);
+
+    async function scalarKeypair(info, name, usages, verifyUsage) {
+      const bits = await crypto.subtle.deriveBits(
+        { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode(info) },
+        hkdfKey, 256
+      );
+      const privateKey = await crypto.subtle.importKey(
+        'pkcs8', buildP256PKCS8(new Uint8Array(bits)),
+        { name, namedCurve: 'P-256' }, true, usages
+      );
+      // Export JWK to get x/y (Web Crypto computed them from the scalar)
+      const jwk = await crypto.subtle.exportKey('jwk', privateKey);
+      const publicKey = await crypto.subtle.importKey(
+        'jwk', { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
+        { name, namedCurve: 'P-256' }, true, verifyUsage
+      );
+      return { publicKey, privateKey };
+    }
+
+    const ecdh = await scalarKeypair('blind-edge-ecdh-v2', 'ECDH', ['deriveKey', 'deriveBits'], []);
+    const sign = await scalarKeypair('blind-edge-ecdsa-v2', 'ECDSA', ['sign'], ['verify']);
+    return { ecdh, sign };
   }
 
   static async encryptVault(data, masterKey) {

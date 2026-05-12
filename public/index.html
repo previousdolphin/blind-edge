@@ -986,6 +986,113 @@
     }
 
     /* ------------------------------------------------------------------ */
+    /* Seed phrase grid                                                    */
+    /* ------------------------------------------------------------------ */
+    .seed-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin: 12px 0;
+      padding: 12px;
+      background: #111;
+      border-radius: 8px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .seed-word {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #1a1a1a;
+      border-radius: 6px;
+    }
+
+    .seed-num {
+      color: #555;
+      font-size: 10px;
+      min-width: 14px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .seed-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #e8e8e8;
+    }
+
+    .seed-passphrase-note {
+      font-size: 12px;
+      color: #888;
+      margin: 4px 0 8px;
+      padding: 8px 12px;
+      background: #1a1a1a;
+      border-radius: 6px;
+      line-height: 1.5;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Add-contact tabs + discovery code                                   */
+    /* ------------------------------------------------------------------ */
+    .tab-row {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: #888;
+      padding: 8px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      font-size: 13px;
+      font-family: inherit;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn.active {
+      color: #e8e8e8;
+      border-bottom-color: #5b8dee;
+    }
+
+    .code-hint {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .code-subsection {
+      margin-bottom: 12px;
+    }
+
+    .code-btn-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    #my-code-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 26px;
+      letter-spacing: 6px;
+      color: #e8e8e8;
+      text-align: center;
+      padding: 10px 0 4px;
+    }
+
+    #discovery-expiry {
+      font-size: 12px;
+      color: #4ade80;
+      text-align: center;
+      margin-bottom: 4px;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Feature pills + about link                                          */
     /* ------------------------------------------------------------------ */
     .feature-pills {
@@ -1215,7 +1322,49 @@
 
           <div id="import-error" class="error hidden"></div>
 
+          <a id="link-mnemonic-import" class="auth-back" style="margin-top:4px">Restore from seed phrase →</a>
           <a id="back-to-unlock-from-import" class="auth-back">← Back to unlock</a>
+        </div>
+      </div>
+
+      <!-- Mnemonic import sub-state -->
+      <div id="auth-mnemonic" class="hidden">
+        <div class="auth-card">
+          <div class="auth-section-title">Restore from Seed Phrase</div>
+          <div class="auth-section-desc">
+            Enter your 12 seed words separated by spaces, plus your passphrase if you set one (13th word). Set a new App Password to protect the restored identity on this device.
+          </div>
+
+          <textarea
+            id="mnemonic-input"
+            placeholder="word1 word2 word3 … word12"
+            rows="3"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            style="font-family:'JetBrains Mono',monospace;font-size:13px;resize:none"
+          ></textarea>
+
+          <input
+            type="password"
+            id="mnemonic-passphrase"
+            placeholder="Passphrase (13th word, optional)"
+            autocomplete="off"
+          >
+
+          <input
+            type="password"
+            id="mnemonic-new-password"
+            placeholder="New App Password (min 8 chars)"
+            autocomplete="new-password"
+          >
+
+          <button id="btn-import-mnemonic" class="btn-primary">Restore Identity</button>
+
+          <div id="mnemonic-error" class="error hidden"></div>
+
+          <a id="back-to-import-from-mnemonic" class="auth-back">← Back to import</a>
         </div>
       </div>
     </div>
@@ -1275,32 +1424,88 @@
       <div class="modal-box">
         <div class="modal-title" id="modal-add-contact-title">Add Contact</div>
 
-        <div class="label">Name</div>
-        <input
-          type="text"
-          id="contact-name-input"
-          placeholder="Contact name"
-          autocomplete="off"
-          autocapitalize="words"
-        >
-
-        <div class="label">Public Key</div>
-        <textarea
-          id="contact-key-input"
-          placeholder="Their public key (hex)"
-          rows="3"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          spellcheck="false"
-        ></textarea>
-
-        <div id="contact-error" class="error hidden"></div>
-
-        <div class="modal-actions">
-          <button id="btn-cancel-contact" class="btn-secondary">Cancel</button>
-          <button id="btn-save-contact" class="btn-primary">Add Contact</button>
+        <div class="tab-row">
+          <button id="tab-by-key" class="tab-btn active">By Key</button>
+          <button id="tab-by-code" class="tab-btn">By Code</button>
         </div>
+
+        <!-- By Key section -->
+        <div id="section-by-key">
+          <div class="label">Name</div>
+          <input
+            type="text"
+            id="contact-name-input"
+            placeholder="Contact name"
+            autocomplete="off"
+            autocapitalize="words"
+          >
+
+          <div class="label">Public Key</div>
+          <textarea
+            id="contact-key-input"
+            placeholder="Their public key (hex)"
+            rows="3"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+          ></textarea>
+
+          <div id="contact-error" class="error hidden"></div>
+
+          <div class="modal-actions">
+            <button id="btn-cancel-contact" class="btn-secondary">Cancel</button>
+            <button id="btn-save-contact" class="btn-primary">Add Contact</button>
+          </div>
+        </div>
+
+        <!-- By Code section -->
+        <div id="section-by-code" class="hidden">
+
+          <div class="code-subsection">
+            <div class="label">Your Code — Share With Contact</div>
+            <div class="code-hint">Generate a 10-minute code. Share it verbally — your contact enters it to add you automatically.</div>
+            <div id="my-code-section" class="hidden">
+              <div id="my-code-display"></div>
+              <div id="discovery-expiry" class="hidden"></div>
+            </div>
+            <div class="code-btn-row">
+              <button id="btn-generate-code" class="btn-secondary" style="flex:1">Generate</button>
+              <button id="btn-register-code" class="btn-primary" style="flex:1" disabled>Register</button>
+            </div>
+          </div>
+
+          <div class="or-divider">or enter their code</div>
+
+          <div class="label">Name</div>
+          <input
+            type="text"
+            id="lookup-contact-name"
+            placeholder="Contact name"
+            autocomplete="off"
+            autocapitalize="words"
+          >
+
+          <div class="label">Their Code</div>
+          <input
+            type="text"
+            id="lookup-code-input"
+            placeholder="e.g. XK9R3Q"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            style="font-family:'JetBrains Mono',monospace;letter-spacing:3px;text-transform:uppercase"
+          >
+
+          <div id="lookup-error" class="error hidden"></div>
+
+          <div class="modal-actions">
+            <button id="btn-cancel-contact-code" class="btn-secondary">Cancel</button>
+            <button id="btn-lookup-code" class="btn-primary">Look Up</button>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -1322,6 +1527,7 @@
         <div class="modal-actions">
           <button id="btn-copy-pubkey" class="btn-primary">Copy Key</button>
           <button id="btn-export-identity" class="btn-primary">Export JSON</button>
+          <button id="btn-show-seed" class="btn-secondary hidden">Seed Phrase</button>
           <button id="btn-close-identity" class="btn-secondary">Close</button>
         </div>
       </div>
@@ -1460,6 +1666,40 @@
         <div class="modal-actions">
           <button id="btn-cancel-export" class="btn-secondary">Cancel</button>
           <button id="btn-confirm-export" class="btn-danger" disabled>Export Key File</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Seed Phrase                                                  -->
+    <!-- ================================================================ -->
+    <div id="modal-seed-phrase" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box modal-warning">
+        <div class="modal-title warning-title">Your Seed Phrase</div>
+
+        <p class="warning-intro">
+          These 12 words can recreate your exact keypair on any device — <strong>without a JSON file or your App Password</strong>.
+        </p>
+
+        <div class="warning-items">
+          <div class="warning-item">Anyone with these words (and your passphrase, if set) can impersonate you and read your future messages.</div>
+          <div class="warning-item"><strong>Write them on paper only.</strong> Do not screenshot, type in any other app, or store them digitally.</div>
+          <div class="warning-item">If you set a passphrase (13th word) when restoring, it is required alongside these words.</div>
+        </div>
+
+        <label class="warning-confirm-row" for="seed-confirm-check">
+          <input type="checkbox" id="seed-confirm-check">
+          <span>I understand the risks. Show my seed phrase.</span>
+        </label>
+
+        <div id="seed-phrase-words" class="seed-grid hidden"></div>
+        <div id="seed-passphrase-note" class="seed-passphrase-note hidden">
+          If you used a passphrase (13th word) when creating this identity, you will need it along with these 12 words to restore access.
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-confirm-seed" class="btn-danger" disabled>Reveal Words</button>
+          <button id="btn-close-seed" class="btn-secondary">Close</button>
         </div>
       </div>
     </div>

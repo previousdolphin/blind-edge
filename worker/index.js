@@ -41,6 +41,16 @@ function isValidHash(s) {
   return typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
 }
 
+// Combined public key: "ecdhHex:signHex" (261 chars) or legacy ECDH-only (130 chars)
+function isValidPublicKey(s) {
+  if (typeof s !== 'string') return false;
+  if (s.includes(':')) {
+    const [a, b] = s.split(':');
+    return /^[0-9a-f]{130}$/.test(a) && /^[0-9a-f]{130}$/.test(b);
+  }
+  return /^[0-9a-f]{130}$/.test(s);
+}
+
 function isValidCiphertext(s, maxLen) {
   return typeof s === 'string' && s.length > 0 && s.length <= maxLen && /^[0-9a-f]+$/.test(s);
 }
@@ -123,6 +133,58 @@ async function handleSync(request, env, corsHeaders) {
   return json({ envelopes }, 200, corsHeaders);
 }
 
+// TTL for rendezvous registrations: 10 minutes
+const RENDEZVOUS_TTL_MS = 10 * 60 * 1000;
+
+async function handleMeetRegister(request, env, corsHeaders) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRate(ip, 'send')) {
+    return json({ error: 'Rate limit exceeded' }, 429, corsHeaders);
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return json({ error: 'Invalid request' }, 400, corsHeaders);
+  }
+
+  const { meeting_hash, public_key } = body;
+  if (!isValidHash(meeting_hash) || !isValidPublicKey(public_key)) {
+    return json({ error: 'Invalid request' }, 400, corsHeaders);
+  }
+
+  const now = Date.now();
+  const expires_at = now + RENDEZVOUS_TTL_MS;
+
+  await env.DB.prepare(
+    `INSERT INTO rendezvous (meeting_hash, public_key, expires_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(meeting_hash) DO UPDATE SET public_key=excluded.public_key, expires_at=excluded.expires_at`
+  ).bind(meeting_hash, public_key, expires_at).run();
+
+  return json({ ok: true, expires_at }, 201, corsHeaders);
+}
+
+async function handleMeetLookup(request, env, corsHeaders) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRate(ip, 'sync')) {
+    return json({ error: 'Rate limit exceeded' }, 429, corsHeaders);
+  }
+
+  const url = new URL(request.url);
+  const meeting_hash = url.searchParams.get('hash');
+  if (!isValidHash(meeting_hash)) {
+    return json({ error: 'Invalid request' }, 400, corsHeaders);
+  }
+
+  const now = Date.now();
+  const row = await env.DB.prepare(
+    'SELECT public_key, expires_at FROM rendezvous WHERE meeting_hash = ? AND expires_at > ?'
+  ).bind(meeting_hash, now).first();
+
+  if (!row) return json({ error: 'Not found or expired' }, 404, corsHeaders);
+  return json({ public_key: row.public_key, expires_at: row.expires_at }, 200, corsHeaders);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const corsHeaders = getCorsHeaders(request, env);
@@ -138,7 +200,11 @@ export default {
         return await handleSend(request, env, corsHeaders);
       } else if (url.pathname === '/api/sync' && request.method === 'GET') {
         return await handleSync(request, env, corsHeaders);
-      } else if (url.pathname === '/api/send' || url.pathname === '/api/sync') {
+      } else if (url.pathname === '/api/meet' && request.method === 'POST') {
+        return await handleMeetRegister(request, env, corsHeaders);
+      } else if (url.pathname === '/api/meet' && request.method === 'GET') {
+        return await handleMeetLookup(request, env, corsHeaders);
+      } else if (['/api/send','/api/sync','/api/meet'].includes(url.pathname)) {
         return json({ error: 'Method not allowed' }, 405, corsHeaders);
       } else {
         return json({ error: 'Not found' }, 404, corsHeaders);
@@ -148,9 +214,10 @@ export default {
     }
   },
 
-  // Cron trigger: prune envelopes older than 24 hours every 6 hours
+  // Cron trigger: prune stale data every 6 hours
   async scheduled(event, env, ctx) {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    await env.DB.prepare('DELETE FROM envelopes WHERE created_at < ?').bind(cutoff).run();
+    const envelopeCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    await env.DB.prepare('DELETE FROM envelopes WHERE created_at < ?').bind(envelopeCutoff).run();
+    await env.DB.prepare('DELETE FROM rendezvous WHERE expires_at < ?').bind(Date.now()).run();
   },
 };

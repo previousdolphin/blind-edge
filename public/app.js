@@ -1,6 +1,7 @@
 import { SecurityManager } from './crypto.js';
 import { StorageManager } from './storage.js';
 import { hexToBytes, bytesToHex } from './hex.js';
+import { entropyToMnemonic, mnemonicToEntropy, mnemonicToSeed, validateMnemonicWords } from './bip39.js';
 
 // Shared demo relay — works out of the box; replace with your own in Settings
 const DEMO_WORKER_URL = 'https://blind-edge-api.jdo-8af.workers.dev';
@@ -96,10 +97,10 @@ function setLoading(btn, yes, label) {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function showAuthSub(sub) {
-  ['unlock', 'setup', 'import'].forEach(s =>
+  ['unlock', 'setup', 'import', 'mnemonic'].forEach(s =>
     $id(`auth-${s}`).classList.toggle('hidden', s !== sub)
   );
-  ['unlock-error', 'setup-error', 'import-error'].forEach(clearErr);
+  ['unlock-error', 'setup-error', 'import-error', 'mnemonic-error'].forEach(clearErr);
 }
 
 async function doUnlock() {
@@ -501,6 +502,8 @@ function openIdentityModal() {
   $id('identity-pubkey').textContent = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
   $id('identity-hash').textContent = state.keyHash;
   $id('identity-identicon').innerHTML = generateIdenticon(state.keyHash || state.ecdhPubKeyHex, 72);
+  const bundle = JSON.parse(localStorage.getItem('blind-edge:identity') || 'null');
+  $id('btn-show-seed').classList.toggle('hidden', !bundle?.entropy);
   openModal('modal-identity');
 }
 
@@ -585,6 +588,139 @@ function doExportIdentityJSON() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   showToast('Key file downloaded — delete it after importing.', 'info');
+}
+
+// ─── Seed Phrase ──────────────────────────────────────────────────────────────
+
+function openSeedPhraseModal() {
+  $id('seed-confirm-check').checked = false;
+  $id('btn-confirm-seed').disabled = true;
+  $id('seed-phrase-words').classList.add('hidden');
+  $id('seed-passphrase-note').classList.add('hidden');
+  openModal('modal-seed-phrase');
+}
+
+async function doRevealSeedPhrase() {
+  const bundle = JSON.parse(localStorage.getItem('blind-edge:identity') || 'null');
+  if (!bundle?.entropy) return;
+  const words = entropyToMnemonic(hexToBytes(bundle.entropy));
+  const grid = $id('seed-phrase-words');
+  grid.innerHTML = words.map((w, i) =>
+    `<div class="seed-word"><span class="seed-num">${i + 1}</span><span class="seed-text">${w}</span></div>`
+  ).join('');
+  grid.classList.remove('hidden');
+  $id('seed-passphrase-note').classList.remove('hidden');
+}
+
+async function doImportFromMnemonic() {
+  const raw = ($id('mnemonic-input').value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const passphrase = $id('mnemonic-passphrase').value;
+  const newPassword = $id('mnemonic-new-password').value;
+  const words = raw.split(' ').filter(Boolean);
+  clearErr('mnemonic-error');
+
+  if (words.length !== 12) { showErr('mnemonic-error', 'Enter exactly 12 seed words.'); return; }
+  if (!validateMnemonicWords(words)) { showErr('mnemonic-error', 'One or more words are not in the BIP39 word list.'); return; }
+  if (newPassword.length < 8) { showErr('mnemonic-error', 'App Password must be at least 8 characters.'); return; }
+
+  let entropy;
+  try { entropy = mnemonicToEntropy(words); } catch {
+    showErr('mnemonic-error', 'Invalid seed phrase — checksum mismatch.'); return;
+  }
+
+  const btn = $id('btn-import-mnemonic');
+  setLoading(btn, true, 'Restoring…');
+  try {
+    const seed64 = await mnemonicToSeed(words, passphrase);
+    const { ecdh, sign } = await SecurityManager.deriveIdentityFromSeed(seed64);
+    const salt = SecurityManager.generateSalt();
+    const masterKey = await SecurityManager.deriveKey(newPassword, salt);
+    const bundleStr = await SecurityManager.exportIdentityBundle(ecdh, sign, masterKey, salt);
+    const bundle = JSON.parse(bundleStr);
+    bundle.entropy = bytesToHex(entropy);
+    localStorage.setItem('blind-edge:identity', JSON.stringify(bundle));
+    $id('mnemonic-input').value = '';
+    $id('mnemonic-passphrase').value = '';
+    $id('mnemonic-new-password').value = '';
+    await bootApp({ ecdh, sign, migratedFromV1: false }, masterKey, salt);
+    showToast('Identity restored from seed phrase.', 'success');
+  } catch (e) {
+    showErr('mnemonic-error', 'Restore failed: ' + e.message);
+  } finally {
+    setLoading(btn, false, 'Restore Identity');
+  }
+}
+
+// ─── Discovery Code ────────────────────────────────────────────────────────────
+
+let _myDiscoveryCode = null;
+
+async function _hashCode(code) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code.toUpperCase()));
+  return bytesToHex(new Uint8Array(buf));
+}
+
+function generateDiscoveryCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  _myDiscoveryCode = Array.from(bytes, b => chars[b % chars.length]).join('');
+  $id('my-code-display').textContent = _myDiscoveryCode;
+  $id('my-code-section').classList.remove('hidden');
+  $id('discovery-expiry').classList.add('hidden');
+  $id('btn-register-code').disabled = false;
+}
+
+async function registerDiscoveryCode() {
+  if (!_myDiscoveryCode) return;
+  const hash = await _hashCode(_myDiscoveryCode);
+  const pubKey = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
+  const serverUrl = await state.storage.getSetting('serverUrl') || DEMO_WORKER_URL;
+  const btn = $id('btn-register-code');
+  setLoading(btn, true, 'Registering…');
+  try {
+    const res = await fetch(`${serverUrl}/api/meet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meeting_hash: hash, public_key: pubKey }),
+    });
+    if (!res.ok) throw new Error('Server error');
+    const { expires_at } = await res.json();
+    const mins = Math.max(1, Math.round((expires_at - Date.now()) / 60000));
+    $id('discovery-expiry').textContent = `Active for ~${mins} min`;
+    $id('discovery-expiry').classList.remove('hidden');
+    showToast('Code registered — share it verbally', 'success');
+  } catch (e) {
+    showToast('Registration failed: ' + e.message, 'error');
+  } finally {
+    setLoading(btn, false, 'Register');
+  }
+}
+
+async function lookupDiscoveryCode() {
+  const code = ($id('lookup-code-input').value || '').trim().toUpperCase();
+  const name = ($id('lookup-contact-name').value || '').trim();
+  clearErr('lookup-error');
+  if (!code) { showErr('lookup-error', 'Enter the discovery code.'); return; }
+  if (!name) { showErr('lookup-error', 'Enter a name for this contact.'); return; }
+  const hash = await _hashCode(code);
+  const serverUrl = await state.storage.getSetting('serverUrl') || DEMO_WORKER_URL;
+  const btn = $id('btn-lookup-code');
+  setLoading(btn, true, 'Looking up…');
+  try {
+    const res = await fetch(`${serverUrl}/api/meet?hash=${hash}`);
+    if (res.status === 404) { showErr('lookup-error', 'Code not found or expired.'); return; }
+    if (!res.ok) throw new Error('Server error');
+    const { public_key } = await res.json();
+    const [ecdhHex, signHex] = public_key.includes(':') ? public_key.split(':') : [public_key, null];
+    await state.storage.addContact(name, ecdhHex, signHex || null);
+    closeModal('modal-add-contact');
+    await refreshContacts();
+    showToast(`${name} added via discovery code`, 'success');
+  } catch (e) {
+    if (!$id('lookup-error').textContent) showToast('Lookup failed: ' + e.message, 'error');
+  } finally {
+    setLoading(btn, false, 'Look Up');
+  }
 }
 
 async function downloadDB() {
@@ -703,7 +839,17 @@ function wireEvents() {
   $id('btn-back').addEventListener('click', goBack);
   $id('btn-identity').addEventListener('click', openIdentityModal);
   $id('btn-settings').addEventListener('click', openSettingsModal);
-  $id('btn-add-contact').addEventListener('click', () => openModal('modal-add-contact'));
+  $id('btn-add-contact').addEventListener('click', () => {
+    // Reset to By Key tab
+    $id('section-by-key').classList.remove('hidden');
+    $id('section-by-code').classList.add('hidden');
+    $id('tab-by-key').classList.add('active');
+    $id('tab-by-code').classList.remove('active');
+    clearErr('contact-error');
+    clearErr('lookup-error');
+    $id('my-code-section').classList.add('hidden');
+    openModal('modal-add-contact');
+  });
 
   // Compose
   const composeInput = $id('compose-input');
@@ -716,9 +862,27 @@ function wireEvents() {
   });
   $id('btn-send').addEventListener('click', sendMessage);
 
-  // Add contact modal
+  // Add contact modal — By Key tab
+  $id('tab-by-key').addEventListener('click', () => {
+    $id('section-by-key').classList.remove('hidden');
+    $id('section-by-code').classList.add('hidden');
+    $id('tab-by-key').classList.add('active');
+    $id('tab-by-code').classList.remove('active');
+  });
+  $id('tab-by-code').addEventListener('click', () => {
+    $id('section-by-code').classList.remove('hidden');
+    $id('section-by-key').classList.add('hidden');
+    $id('tab-by-code').classList.add('active');
+    $id('tab-by-key').classList.remove('active');
+  });
   $id('btn-cancel-contact').addEventListener('click', () => closeModal('modal-add-contact'));
   $id('btn-save-contact').addEventListener('click', addContact);
+
+  // Add contact modal — By Code tab
+  $id('btn-generate-code').addEventListener('click', generateDiscoveryCode);
+  $id('btn-register-code').addEventListener('click', registerDiscoveryCode);
+  $id('btn-lookup-code').addEventListener('click', lookupDiscoveryCode);
+  $id('btn-cancel-contact-code').addEventListener('click', () => closeModal('modal-add-contact'));
 
   // Identity modal
   $id('btn-copy-pubkey').addEventListener('click', async () => {
@@ -726,11 +890,31 @@ function wireEvents() {
     showToast('Public key copied', 'success');
   });
   $id('btn-export-identity').addEventListener('click', () => { closeModal('modal-identity'); openExportWarning(); });
+  $id('btn-show-seed').addEventListener('click', () => { closeModal('modal-identity'); openSeedPhraseModal(); });
   $id('export-confirm-check').addEventListener('change', e => {
     $id('btn-confirm-export').disabled = !e.target.checked;
   });
   $id('btn-confirm-export').addEventListener('click', doExportIdentityJSON);
   $id('btn-cancel-export').addEventListener('click', () => closeModal('modal-export-warning'));
+
+  // Seed phrase modal
+  $id('seed-confirm-check').addEventListener('change', async e => {
+    $id('btn-confirm-seed').disabled = !e.target.checked;
+    if (e.target.checked) await doRevealSeedPhrase();
+    else {
+      $id('seed-phrase-words').classList.add('hidden');
+      $id('seed-passphrase-note').classList.add('hidden');
+    }
+  });
+  $id('btn-confirm-seed').addEventListener('click', async () => {
+    if ($id('seed-phrase-words').classList.contains('hidden')) await doRevealSeedPhrase();
+  });
+  $id('btn-close-seed').addEventListener('click', () => closeModal('modal-seed-phrase'));
+
+  // Mnemonic import
+  $id('link-mnemonic-import').addEventListener('click', () => showAuthSub('mnemonic'));
+  $id('back-to-import-from-mnemonic').addEventListener('click', () => showAuthSub('import'));
+  $id('btn-import-mnemonic').addEventListener('click', doImportFromMnemonic);
 
   // Chat settings / TTL
   $id('btn-ttl').addEventListener('click', openChatSettings);
