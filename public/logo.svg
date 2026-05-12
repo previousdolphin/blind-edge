@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 160" fill="none" role="img" aria-label="B.E.Chat — Blind-Edge Messenger">
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f8f8f8"/>
+      <stop offset="18%"  stop-color="#dcdcdc"/>
+      <stop offset="42%"  stop-color="#888"/>
+      <stop offset="52%"  stop-color="#b4b4b4"/>
+      <stop offset="76%"  stop-color="#e8e8e8"/>
+      <stop offset="100%" stop-color="#c4c4c4"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0.1" y1="0" x2="0.45" y2="0.9">
+      <stop offset="0%"   stop-color="#fff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bfold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#166534"/>
+      <stop offset="45%"  stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <filter id="tshadow" x="-5%" y="-10%" width="115%" height="135%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+    <filter id="bglow" x="-30%" y="-60%" width="160%" height="220%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="b"/>
+      <feFlood flood-color="#4ade80" flood-opacity="0.35" result="c"/>
+      <feComposite in="c" in2="b" operator="in" result="s"/>
+      <feComposite in="SourceGraphic" in2="s" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Pill background -->
+  <rect width="680" height="160" rx="18" fill="#0a0a0a"/>
+  <rect x="0.75" y="0.75" width="678.5" height="158.5" rx="17.25" stroke="#1e1e1e" stroke-width="1.5" fill="none"/>
+
+  <!-- ── Figure ───────────────────────────────── -->
+  <!-- Shoulders -->
+  <path d="M 12 155 Q 38 134 76 130 Q 114 134 140 155" stroke="#222" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Neck -->
+  <rect x="67" y="113" width="18" height="19" rx="5" fill="#111" stroke="#222" stroke-width="1.5"/>
+  <!-- Left ear -->
+  <ellipse cx="33" cy="72" rx="7" ry="12" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
+  <!-- Right ear -->
+  <ellipse cx="119" cy="72" rx="7" ry="12" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
+  <!-- Head -->
+  <circle cx="76" cy="72" r="46" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
+
+  <!-- Blindfold -->
+  <rect x="33" y="57" width="92" height="28" rx="7" fill="url(#bfold)" filter="url(#bglow)"/>
+  <!-- Blindfold highlight -->
+  <rect x="40" y="61" width="52" height="10" rx="5" fill="#fff" opacity="0.14"/>
+  <!-- Knot -->
+  <ellipse cx="131" cy="71" rx="10" ry="9" fill="#166534"/>
+  <ellipse cx="131" cy="71" rx="6" ry="5" fill="#15803d"/>
+  <!-- Tie tails (right side) -->
+  <path d="M 139 64 C 147 58 155 52 162 47" stroke="#166534" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M 139 78 C 147 84 155 90 162 95" stroke="#166534" stroke-width="3" stroke-linecap="round" fill="none"/>
+
+  <!-- Nose -->
+  <path d="M 73 82 L 72 94 Q 76 98 80 94 L 79 82" stroke="#252525" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Mouth — slight smile -->
+  <path d="M 60 108 Q 76 120 92 108" stroke="#252525" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- ── "B.E.Chat" text ───────────────────────── -->
+  <text
+    x="172" y="118"
+    font-family="'Arial Black', 'Arial Bold', 'Helvetica Neue', Arial, sans-serif"
+    font-size="78"
+    font-weight="900"
+    fill="url(#chrome)"
+    filter="url(#tshadow)"
+    letter-spacing="-2">B.E.Chat</text>
+  <!-- Shine pass -->
+  <text
+    x="172" y="118"
+    font-family="'Arial Black', 'Arial Bold', 'Helvetica Neue', Arial, sans-serif"
+    font-size="78"
+    font-weight="900"
+    fill="url(#shine)"
+    letter-spacing="-2">B.E.Chat</text>
+
+  <!-- Tagline -->
+  <text
+    x="175" y="146"
+    font-family="'Courier New', 'Lucida Console', Courier, monospace"
+    font-size="12"
+    fill="#363636"
+    letter-spacing="0.18em">BLIND-EDGE  PROTOCOL</text>
+</svg>

@@ -1,0 +1,12 @@
+name = "blind-edge-api"
+main = "index.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "blind-edge-db"
+database_id = "49077726-db64-4f4d-bd5d-3b6564bc4258"
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:8080,https://blind-edge.pages.dev,https://blind-edge-api.jdo-8af.workers.dev"
+MAX_CIPHERTEXT_LENGTH = "131072"

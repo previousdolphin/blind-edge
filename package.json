@@ -1,0 +1,16 @@
+{
+  "name": "blind-edge",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve public -p 8080",
+    "db:create": "cd worker && npx wrangler d1 create blind-edge-db",
+    "db:init": "cd worker && npx wrangler d1 execute blind-edge-db --file=schema.sql",
+    "worker:dev": "cd worker && npx wrangler dev",
+    "worker:deploy": "cd worker && npx wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0",
+    "serve": "^14.0.0"
+  }
+}

@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Local-first, end-to-end encrypted messaging">
+  <title>Blind-Edge</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset                                                                */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Root                                                                 */
+    /* ------------------------------------------------------------------ */
+    body {
+      background: #0a0a0a;
+      color: #e8e8e8;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      height: 100dvh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 440px;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: #0a0a0a;
+      border-left: 1px solid #1a1a1a;
+      border-right: 1px solid #1a1a1a;
+      overflow: hidden;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Views                                                                */
+    /* ------------------------------------------------------------------ */
+    .view {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    .view.hidden {
+      display: none;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Auth view                                                            */
+    /* ------------------------------------------------------------------ */
+    .view-auth {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #0a0a0a;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 340px;
+    }
+
+    .wordmark {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+      color: #e8e8e8;
+      margin-bottom: 6px;
+    }
+
+    .tagline {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .e2ee-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .auth-section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e8e8e8;
+      margin-bottom: 6px;
+    }
+
+    .auth-section-desc {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+
+    .auth-back {
+      display: inline-block;
+      font-size: 12px;
+      color: #555;
+      cursor: pointer;
+      margin-top: 14px;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .auth-back:hover {
+      color: #888;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Inputs                                                               */
+    /* ------------------------------------------------------------------ */
+    input[type="text"],
+    input[type="password"],
+    input[type="url"],
+    input[type="number"],
+    input[type="file"],
+    textarea {
+      width: 100%;
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      color: #e8e8e8;
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      margin-bottom: 12px;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: #3b82f6;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #444;
+    }
+
+    textarea {
+      resize: none;
+      line-height: 1.5;
+    }
+
+    input[type="file"] {
+      cursor: pointer;
+      color: #888;
+      padding: 8px 12px;
+    }
+
+    input[type="file"]::-webkit-file-upload-button {
+      background: #1e1e1e;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      color: #888;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+
+    .or-divider {
+      text-align: center;
+      font-size: 11px;
+      color: #333;
+      margin: 4px 0 10px;
+      position: relative;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 42%;
+      height: 1px;
+      background: #2a2a2a;
+    }
+
+    .or-divider::before { left: 0; }
+    .or-divider::after { right: 0; }
+
+    /* ------------------------------------------------------------------ */
+    /* Buttons                                                              */
+    /* ------------------------------------------------------------------ */
+    button {
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 16px;
+      transition: opacity 0.15s, background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* Primary: full-width, high-contrast */
+    .btn-primary {
+      background: #e8e8e8;
+      color: #0a0a0a;
+      width: 100%;
+      margin-top: 4px;
+    }
+
+    .btn-primary:not(:disabled):hover {
+      opacity: 0.88;
+    }
+
+    .btn-primary:not(:disabled):active {
+      opacity: 0.75;
+    }
+
+    /* Secondary: ghost */
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #888;
+    }
+
+    .btn-secondary:not(:disabled):hover {
+      border-color: #3a3a3a;
+      color: #aaa;
+    }
+
+    /* Danger */
+    .btn-danger {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .btn-danger:not(:disabled):hover {
+      opacity: 0.88;
+    }
+
+    /* Auth links line */
+    .auth-links {
+      font-size: 12px;
+      color: #555;
+      text-align: center;
+      margin-top: 16px;
+      line-height: 1.8;
+    }
+
+    .auth-links a {
+      color: #3b82f6;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }
+
+    .auth-links a:hover {
+      opacity: 0.8;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #0a0a0a44;
+      border-top-color: #0a0a0a;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Error                                                                */
+    /* ------------------------------------------------------------------ */
+    .error {
+      color: #ef4444;
+      font-size: 12px;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* App Header                                                           */
+    /* ------------------------------------------------------------------ */
+    #view-app {
+      display: flex;
+      flex-direction: column;
+    }
+
+    #app-header {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      height: 48px;
+      border-bottom: 1px solid #1a1a1a;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+
+    #btn-back {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      padding: 5px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    #btn-back:not(:disabled):hover {
+      border-color: #3a3a3a;
+      color: #aaa;
+    }
+
+    #app-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      color: #e8e8e8;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .header-actions button {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    .header-actions button:not(:disabled):hover {
+      border-color: #3a3a3a;
+      color: #aaa;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Panels                                                               */
+    /* ------------------------------------------------------------------ */
+    .panel {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .panel.hidden {
+      display: none;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      flex-shrink: 0;
+    }
+
+    #btn-add-contact {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #4ade80;
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+
+    #btn-add-contact:not(:disabled):hover {
+      border-color: #4ade8055;
+      background: #4ade800a;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Contact List                                                         */
+    /* ------------------------------------------------------------------ */
+    #contact-list {
+      flex: 1;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      gap: 12px;
+      border-bottom: 1px solid #141414;
+      cursor: pointer;
+      transition: background 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .contact-item:hover {
+      background: #0f0f0f;
+    }
+
+    .contact-item:active {
+      background: #111;
+    }
+
+    .contact-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #1e1e1e;
+      border: 1px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #666;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      user-select: none;
+    }
+
+    .contact-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .contact-name {
+      font-weight: 500;
+      font-size: 14px;
+      color: #e8e8e8;
+    }
+
+    .contact-last-msg {
+      font-size: 12px;
+      color: #555;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .contact-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .contact-time {
+      font-size: 11px;
+      color: #444;
+    }
+
+    .contact-unread {
+      background: #4ade80;
+      color: #0a0a0a;
+      border-radius: 10px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      min-width: 18px;
+      text-align: center;
+    }
+
+    .contact-unread:empty {
+      display: none;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Empty state                                                          */
+    /* ------------------------------------------------------------------ */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #333;
+      font-size: 13px;
+      gap: 8px;
+      padding: 32px 24px;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    .empty-state p:first-child {
+      color: #444;
+      font-weight: 500;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Chat Panel                                                           */
+    /* ------------------------------------------------------------------ */
+    #panel-chat {
+      overflow: hidden;
+    }
+
+    #message-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      max-width: 78%;
+    }
+
+    .message.out {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message.in {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .bubble {
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .message.out .bubble {
+      background: #1a2e1a;
+      border: 1px solid rgba(74, 222, 128, 0.2);
+      color: #e8e8e8;
+      border-bottom-right-radius: 3px;
+    }
+
+    .message.in .bubble {
+      background: #1e1e1e;
+      border: 1px solid #2a2a2a;
+      color: #e8e8e8;
+      border-bottom-left-radius: 3px;
+    }
+
+    .msg-status {
+      font-size: 10px;
+      color: #444;
+      margin-top: 3px;
+      padding-right: 2px;
+    }
+
+    .msg-status.pending {
+      color: #444;
+    }
+
+    .msg-status.delivered {
+      color: rgba(74, 222, 128, 0.55);
+    }
+
+    .msg-status.read {
+      color: #4ade80;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Compose                                                              */
+    /* ------------------------------------------------------------------ */
+    #compose {
+      display: flex;
+      gap: 8px;
+      padding: 10px 12px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      border-top: 1px solid #1a1a1a;
+      flex-shrink: 0;
+      align-items: flex-end;
+    }
+
+    #compose-input {
+      flex: 1;
+      resize: none;
+      margin-bottom: 0;
+      max-height: 120px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+
+    #btn-send {
+      align-self: flex-end;
+      background: #4ade80;
+      color: #0a0a0a;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #btn-send:not(:disabled):hover {
+      opacity: 0.88;
+    }
+
+    #btn-send:not(:disabled):active {
+      opacity: 0.75;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Modals                                                               */
+    /* ------------------------------------------------------------------ */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 100;
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+
+    .modal.hidden {
+      display: none;
+    }
+
+    .modal-box {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 24px;
+      width: 100%;
+      max-width: 380px;
+      max-height: 90dvh;
+      overflow-y: auto;
+    }
+
+    .modal-title {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 20px;
+      color: #e8e8e8;
+    }
+
+    .label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      margin-top: 16px;
+    }
+
+    .label:first-of-type {
+      margin-top: 0;
+    }
+
+    .mono-box {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #4ade80;
+      background: #0a0a0a;
+      border: 1px solid #1e1e1e;
+      border-radius: 6px;
+      padding: 10px 12px;
+      word-break: break-all;
+      margin-bottom: 4px;
+      line-height: 1.6;
+      user-select: all;
+    }
+
+    .mono-box.short {
+      letter-spacing: 0.05em;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .modal-actions button {
+      flex: 1;
+      min-width: 0;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      margin: 20px 0;
+    }
+
+    .danger-zone {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .danger-zone .label {
+      margin-top: 0;
+      margin-bottom: 4px;
+    }
+
+    .danger-zone button {
+      align-self: flex-start;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Toast                                                                */
+    /* ------------------------------------------------------------------ */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: #1e1e1e;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      max-width: 280px;
+      line-height: 1.4;
+      animation: slideUp 0.2s ease;
+      pointer-events: auto;
+    }
+
+    .toast.success {
+      border-color: rgba(74, 222, 128, 0.3);
+      color: #4ade80;
+    }
+
+    .toast.error {
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+    }
+
+    .toast.info {
+      color: #e8e8e8;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Utility                                                              */
+    /* ------------------------------------------------------------------ */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #2a2a2a;
+      border-radius: 2px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3a3a3a;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* TTL button in header                                                 */
+    /* ------------------------------------------------------------------ */
+    #btn-ttl {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.04em;
+    }
+
+    #btn-ttl.ttl-active {
+      border-color: rgba(74, 222, 128, 0.4);
+      color: #4ade80;
+    }
+
+    #btn-ttl:not(:disabled):hover {
+      border-color: #3a3a3a;
+      color: #aaa;
+    }
+
+    #btn-ttl.ttl-active:not(:disabled):hover {
+      border-color: rgba(74, 222, 128, 0.6);
+      color: #4ade80;
+    }
+
+    /* TTL notice bar above messages */
+    #ttl-notice {
+      font-size: 11px;
+      color: #4ade8077;
+      text-align: center;
+      padding: 6px 12px;
+      border-bottom: 1px solid #141414;
+      letter-spacing: 0.03em;
+      flex-shrink: 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* TTL option chips                                                      */
+    /* ------------------------------------------------------------------ */
+    .ttl-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .ttl-chip {
+      padding: 10px 12px;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      background: #0a0a0a;
+      color: #888;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      user-select: none;
+    }
+
+    .ttl-chip:hover {
+      border-color: #3a3a3a;
+      color: #ccc;
+    }
+
+    .ttl-chip.selected {
+      border-color: rgba(74, 222, 128, 0.5);
+      color: #4ade80;
+      background: rgba(74, 222, 128, 0.05);
+    }
+
+    .ttl-chip.selected-off {
+      border-color: #3a3a3a;
+      color: #e8e8e8;
+      background: #1a1a1a;
+    }
+
+    .ttl-desc {
+      font-size: 12px;
+      color: #555;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Export warning modal                                                 */
+    /* ------------------------------------------------------------------ */
+    .modal-box.modal-warning {
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .warning-title {
+      color: #ef4444;
+    }
+
+    .warning-intro {
+      font-size: 13px;
+      color: #aaa;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .warning-intro strong {
+      color: #e8e8e8;
+    }
+
+    .warning-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .warning-item {
+      display: flex;
+      gap: 10px;
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+    }
+
+    .warning-item::before {
+      content: '—';
+      color: #ef444466;
+      flex-shrink: 0;
+    }
+
+    .warning-item strong {
+      color: #ccc;
+    }
+
+    .warning-confirm-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px;
+      background: rgba(239, 68, 68, 0.05);
+      border: 1px solid rgba(239, 68, 68, 0.15);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .warning-confirm-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      margin: 0;
+      margin-bottom: 0;
+      accent-color: #ef4444;
+      cursor: pointer;
+    }
+
+    .warning-confirm-row label {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+      cursor: pointer;
+    }
+
+    .warning-confirm-row label strong {
+      color: #ccc;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Feature pills + about link                                          */
+    /* ------------------------------------------------------------------ */
+    .feature-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 26px;
+    }
+
+    .pill {
+      font-size: 11px;
+      color: #555;
+      border: 1px solid #222;
+      border-radius: 99px;
+      padding: 3px 10px;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .pill.pill-green {
+      color: #4ade8077;
+      border-color: #4ade8033;
+    }
+
+    .about-link {
+      display: block;
+      text-align: center;
+      font-size: 11px;
+      color: #383838;
+      margin-top: 20px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: color 0.15s;
+      text-decoration: none;
+    }
+
+    .about-link:hover { color: #555; }
+
+    /* ------------------------------------------------------------------ */
+    /* About modal                                                         */
+    /* ------------------------------------------------------------------ */
+    .about-box {
+      max-width: 420px;
+    }
+
+    .about-section {
+      margin-bottom: 20px;
+    }
+
+    .about-heading {
+      font-size: 11px;
+      font-weight: 600;
+      color: #4ade80;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+    }
+
+    .about-section p,
+    .about-section ol {
+      font-size: 13px;
+      color: #777;
+      line-height: 1.7;
+    }
+
+    .about-section ol {
+      padding-left: 18px;
+    }
+
+    .about-section li {
+      margin-bottom: 4px;
+    }
+
+    .about-section strong {
+      color: #aaa;
+      font-weight: 500;
+    }
+
+    .about-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .about-table th {
+      text-align: left;
+      color: #555;
+      font-weight: 500;
+      padding: 4px 8px 4px 0;
+      border-bottom: 1px solid #1a1a1a;
+    }
+
+    .about-table td {
+      padding: 6px 8px 6px 0;
+      color: #666;
+      border-bottom: 1px solid #141414;
+      vertical-align: top;
+    }
+
+    .about-table td:first-child { color: #888; }
+    .about-table td.nothing { color: #4ade8066; font-style: italic; }
+
+    .about-logo {
+      width: 100%;
+      max-width: 320px;
+      margin: 0 auto 20px;
+      display: block;
+    }
+
+    /* inline logo in auth card (smaller version) */
+    .auth-logo {
+      margin-bottom: 28px;
+    }
+
+    .auth-logo img {
+      width: 100%;
+      max-width: 280px;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ================================================================ -->
+    <!-- AUTH VIEW                                                          -->
+    <!-- ================================================================ -->
+    <div id="view-auth" class="view view-auth active">
+
+      <!-- Unlock sub-state -->
+      <div id="auth-unlock">
+        <div class="auth-card">
+          <div class="auth-logo">
+            <img src="logo.svg" alt="BeChat" draggable="false">
+          </div>
+
+          <div class="feature-pills">
+            <span class="pill pill-green">E2EE</span>
+            <span class="pill">No accounts</span>
+            <span class="pill">Local-first</span>
+            <span class="pill">Zero-knowledge relay</span>
+            <span class="pill">Open source</span>
+          </div>
+
+          <input
+            type="password"
+            id="unlock-password"
+            placeholder="App Password"
+            autocomplete="current-password"
+          >
+          <button id="btn-unlock" class="btn-primary">Unlock</button>
+
+          <div id="unlock-error" class="error hidden"></div>
+
+          <div class="auth-links">
+            New device?
+            <a id="link-import">Import identity</a>
+            &nbsp;&mdash;&nbsp;
+            <a id="link-setup">Create new</a>
+          </div>
+          <a class="about-link" id="link-about">How it works &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Setup sub-state -->
+      <div id="auth-setup" class="hidden">
+        <div class="auth-card">
+          <div class="auth-section-title">Create Identity</div>
+          <div class="auth-section-desc">
+            A keypair is generated locally and encrypted with your password.
+            Nothing is sent to a server. You can export your identity later
+            to restore access on another device.
+          </div>
+
+          <input
+            type="password"
+            id="setup-password"
+            placeholder="App Password"
+            autocomplete="new-password"
+          >
+          <input
+            type="password"
+            id="setup-password-confirm"
+            placeholder="Confirm Password"
+            autocomplete="new-password"
+          >
+          <button id="btn-create" class="btn-primary">Generate Identity</button>
+
+          <div id="setup-error" class="error hidden"></div>
+
+          <a id="back-to-unlock-from-setup" class="auth-back">← Back to unlock</a>
+        </div>
+      </div>
+
+      <!-- Import sub-state -->
+      <div id="auth-import" class="hidden">
+        <div class="auth-card">
+          <div class="auth-section-title">Import Identity</div>
+          <div class="auth-section-desc">
+            Restore from an exported .json bundle. Provide the password
+            you used when the identity was created.
+          </div>
+
+          <input
+            type="password"
+            id="import-password"
+            placeholder="App Password"
+            autocomplete="current-password"
+          >
+
+          <input
+            type="file"
+            id="import-file"
+            accept=".json"
+          >
+
+          <div class="or-divider">or paste JSON</div>
+
+          <textarea
+            id="import-json"
+            placeholder="Paste identity JSON..."
+            rows="4"
+          ></textarea>
+
+          <button id="btn-import" class="btn-primary">Import</button>
+
+          <div id="import-error" class="error hidden"></div>
+
+          <a id="back-to-unlock-from-import" class="auth-back">← Back to unlock</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MAIN APP VIEW                                                      -->
+    <!-- ================================================================ -->
+    <div id="view-app" class="view hidden">
+
+      <!-- App Header -->
+      <header id="app-header">
+        <button id="btn-back" class="hidden">← Back</button>
+        <span id="app-title">Blind-Edge</span>
+        <div class="header-actions">
+          <button id="btn-ttl" class="hidden" title="Message autodestruct">Timer</button>
+          <button id="btn-identity" title="Your Identity">Key</button>
+          <button id="btn-settings" title="Settings">Set</button>
+        </div>
+      </header>
+
+      <!-- Contact List Panel -->
+      <div id="panel-contacts" class="panel active">
+        <div class="panel-header">
+          <span>Conversations</span>
+          <button id="btn-add-contact">+ Add</button>
+        </div>
+        <div id="contact-list"></div>
+        <div id="contact-empty" class="empty-state hidden">
+          <p>No contacts yet.</p>
+          <p>Add a contact by sharing public keys out of band.</p>
+        </div>
+      </div>
+
+      <!-- Chat Panel -->
+      <div id="panel-chat" class="panel hidden">
+        <div id="ttl-notice" class="hidden"></div>
+        <div id="message-list"></div>
+        <div id="compose">
+          <textarea
+            id="compose-input"
+            placeholder="Message..."
+            rows="1"
+            autocomplete="off"
+            autocorrect="on"
+            spellcheck="true"
+          ></textarea>
+          <button id="btn-send">Send</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Add Contact                                                  -->
+    <!-- ================================================================ -->
+    <div id="modal-add-contact" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-add-contact-title">
+      <div class="modal-box">
+        <div class="modal-title" id="modal-add-contact-title">Add Contact</div>
+
+        <div class="label">Name</div>
+        <input
+          type="text"
+          id="contact-name-input"
+          placeholder="Contact name"
+          autocomplete="off"
+          autocapitalize="words"
+        >
+
+        <div class="label">Public Key</div>
+        <textarea
+          id="contact-key-input"
+          placeholder="Their public key (hex)"
+          rows="3"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        ></textarea>
+
+        <div id="contact-error" class="error hidden"></div>
+
+        <div class="modal-actions">
+          <button id="btn-cancel-contact" class="btn-secondary">Cancel</button>
+          <button id="btn-save-contact" class="btn-primary">Add Contact</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Identity                                                     -->
+    <!-- ================================================================ -->
+    <div id="modal-identity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-identity-title">
+      <div class="modal-box">
+        <div class="modal-title" id="modal-identity-title">Your Identity</div>
+
+        <div class="label">Public Key</div>
+        <div id="identity-pubkey" class="mono-box"></div>
+
+        <div class="label">Key Hash (your address)</div>
+        <div id="identity-hash" class="mono-box short"></div>
+
+        <div class="modal-actions">
+          <button id="btn-copy-pubkey" class="btn-primary">Copy Key</button>
+          <button id="btn-export-identity" class="btn-primary">Export JSON</button>
+          <button id="btn-close-identity" class="btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Settings                                                     -->
+    <!-- ================================================================ -->
+    <div id="modal-settings" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
+      <div class="modal-box">
+        <div class="modal-title" id="modal-settings-title">Settings</div>
+
+        <div class="label">Worker URL</div>
+        <input
+          type="url"
+          id="setting-server-url"
+          placeholder="https://blind-edge-api.your-subdomain.workers.dev"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        >
+
+        <div class="label">Sync Interval (seconds)</div>
+        <input
+          type="number"
+          id="setting-sync-interval"
+          min="5"
+          max="300"
+          value="15"
+        >
+
+        <div class="modal-actions">
+          <button id="btn-save-settings" class="btn-primary">Save</button>
+          <button id="btn-close-settings" class="btn-secondary">Cancel</button>
+        </div>
+
+        <hr>
+
+        <div class="danger-zone">
+          <div class="label">Danger Zone</div>
+          <button id="btn-download-db" class="btn-secondary">Download DB</button>
+          <button id="btn-logout" class="btn-danger">Lock &amp; Clear Session</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: About / How it works                                        -->
+    <!-- ================================================================ -->
+    <div id="modal-about" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box about-box">
+
+        <img src="logo.svg" alt="BeChat" class="about-logo">
+
+        <div class="about-section">
+          <div class="about-heading">The Blind Server</div>
+          <p>The relay server stores and forwards your messages as raw ciphertext. It cannot read them, has no concept of user accounts, and never sees your name, password, or contacts. Your "address" is the SHA-256 hash of your public key — a number, not an identity.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">What the server sees</div>
+          <table class="about-table">
+            <tr><th>Field</th><th>Server receives</th><th>Meaning</th></tr>
+            <tr><td>Message</td><td>Hex ciphertext</td><td class="nothing">nothing</td></tr>
+            <tr><td>Sender</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
+            <tr><td>Recipient</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
+            <tr><td>Password</td><td>Never sent</td><td class="nothing">nothing</td></tr>
+            <tr><td>Private key</td><td>Never sent</td><td class="nothing">nothing</td></tr>
+          </table>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">End-to-End Encryption</div>
+          <p>Messages are encrypted using <strong>ECDH P-256 + HKDF + AES-256-GCM</strong> before they leave your browser — using only the native Web Crypto API, no libraries. Only the intended recipient's private key can decrypt them.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Your Identity</div>
+          <p>A cryptographic keypair generated in your browser. Your private key is encrypted with your App Password via <strong>PBKDF2 (210,000 rounds)</strong> and stored locally. It never leaves your device. Export it only when moving to a new device, then delete the file immediately.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Getting Started</div>
+          <ol>
+            <li>Create an identity with a strong App Password</li>
+            <li>Tap <strong>Key</strong> to see your public key — copy and share it out-of-band with your contact (Signal, in person, etc.)</li>
+            <li>Have them share their public key with you</li>
+            <li>Tap <strong>+ Add</strong> to add them as a contact using their key</li>
+            <li>Tap <strong>Set</strong> → enter the Worker URL → Save</li>
+          </ol>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Message Autodestruct</div>
+          <p>In any conversation, tap <strong>Timer</strong> to set a local expiry (1h – 7d). Messages older than that threshold are deleted from your device on every app load. Tell your contact your setting — their copy is independent.</p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-close-about" class="btn-secondary" style="flex:none;">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Export Warning                                               -->
+    <!-- ================================================================ -->
+    <div id="modal-export-warning" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box modal-warning">
+        <div class="modal-title warning-title">Security Warning — Key Export</div>
+
+        <p class="warning-intro">
+          This file contains your <strong>encrypted private key</strong> — the master credential for your identity on this network.
+        </p>
+
+        <div class="warning-items">
+          <div class="warning-item">
+            Anyone who obtains this file <strong>and knows your App Password</strong> can impersonate you and decrypt all messages you have not yet received.
+          </div>
+          <div class="warning-item">
+            Do not send this file over email, iMessage, AirDrop, Slack, or any channel you do not fully control. Assume any cloud storage (iCloud, Dropbox, Google Drive) may retain copies even after deletion.
+          </div>
+          <div class="warning-item">
+            <strong>After importing on your new device, delete this file using secure erase</strong> — not just Trash. On macOS: <em>Finder → right-click → Move to Trash</em> is not sufficient; use <em>rm -P</em> in Terminal or a secure-delete utility.
+          </div>
+          <div class="warning-item">
+            If you lose track of this file, change your App Password immediately by creating a new identity and notifying your contacts.
+          </div>
+        </div>
+
+        <label class="warning-confirm-row" for="export-confirm-check">
+          <input type="checkbox" id="export-confirm-check">
+          <span>I understand. <strong>I will delete this file immediately after importing it</strong> and will not store it in any cloud or shared location.</span>
+        </label>
+
+        <div class="modal-actions">
+          <button id="btn-cancel-export" class="btn-secondary">Cancel</button>
+          <button id="btn-confirm-export" class="btn-danger" disabled>Export Key File</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: Chat Settings (autodestruct)                                -->
+    <!-- ================================================================ -->
+    <div id="modal-chat-settings" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <div class="modal-title">Message Autodestruct</div>
+        <p class="ttl-desc">
+          Messages in this conversation will be deleted from <strong>your device</strong> after the selected time. This does not affect the recipient's copy — share your setting with them so both sides stay in sync.
+        </p>
+
+        <div class="ttl-grid" id="ttl-grid"></div>
+
+        <div class="modal-actions">
+          <button id="btn-close-chat-settings" class="btn-secondary">Cancel</button>
+          <button id="btn-save-ttl" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- Toast container                                                     -->
+    <!-- ================================================================ -->
+    <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  </div><!-- #app -->
+
+  <!-- Toast utility (non-module, available before app.js loads) -->
+  <script>
+    window.showToast = function(message, type) {
+      type = type || 'info';
+      var container = document.getElementById('toast-container');
+      var toast = document.createElement('div');
+      toast.className = 'toast ' + type;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(function() {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+      }, 3500);
+    };
+  </script>
+
+  <!-- sql.js — loaded before the app module -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+
+  <!-- App module -->
+  <script type="module" src="app.js"></script>
+
+  <!-- Service worker registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(function() {});
+    }
+  </script>
+</body>
+</html>
