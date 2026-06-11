@@ -98,7 +98,7 @@
 
   .body-copy {
     font-size: clamp(13px, 1.6vw, 15px);
-    color: var(--dim);
+    color: #97a797;
     max-width: 62ch;
     margin-top: 24px;
   }
@@ -123,6 +123,32 @@
     justify-content: center;
     padding: 14vh clamp(20px, 7vw, 110px);
     position: relative;
+  }
+
+  /* legibility scrim: a soft pool of darkness behind each section's text
+     column, so copy never fights the glowing 3D scene drifting behind it */
+  section::before {
+    content: '';
+    position: absolute;
+    inset: -6% 0; /* vertical bleed only — horizontal would overflow the viewport */
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(ellipse 75% 70% at 30% 50%,
+      rgba(4, 6, 4, .88) 0%,
+      rgba(4, 6, 4, .55) 45%,
+      rgba(4, 6, 4, .15) 70%,
+      transparent 85%);
+  }
+
+  #cta::before {
+    background: radial-gradient(ellipse 70% 70% at 50% 50%,
+      rgba(4, 6, 4, .88) 0%,
+      rgba(4, 6, 4, .5) 50%,
+      transparent 80%);
+  }
+
+  .display, .body-copy, .eyebrow, .boot, .num {
+    text-shadow: 0 1px 2px rgba(0,0,0,.95), 0 0 16px rgba(0,0,0,.8);
   }
 
   .num {
@@ -164,7 +190,7 @@
     color: var(--faint);
     border: 1px solid var(--hair);
     border-radius: 4px;
-    background: rgba(0,0,0,.35);
+    background: rgba(2,4,2,.62);
     padding: clamp(12px, 2.5vw, 22px) clamp(14px, 2.5vw, 26px);
     max-width: 720px;
   }
@@ -286,7 +312,7 @@
     font-size: 11px; color: var(--dim);
     text-align: center; line-height: 1.9;
     flex-shrink: 0;
-    background: rgba(0,0,0,.3);
+    background: rgba(2,4,2,.58);
   }
   .node b { color: var(--ink); font-weight: 700; display: block; letter-spacing: .2em; font-family: 'Space Mono', monospace; }
   .node.relay { border-color: rgba(74,222,128,.35); position: relative; }
@@ -311,7 +337,7 @@
     font-size: clamp(10.5px, 1.4vw, 12.5px);
     border: 1px solid var(--hair);
     border-radius: 4px;
-    background: rgba(0,0,0,.35);
+    background: rgba(2,4,2,.62);
     padding: 6px 14px;
   }
   .sees .row {
@@ -337,7 +363,7 @@
     border: 1px solid var(--hair);
     border-radius: 4px;
     padding: clamp(20px, 3vw, 32px);
-    background: rgba(0,0,0,.3);
+    background: rgba(2,4,2,.58);
     position: relative;
   }
   .fork::before {
