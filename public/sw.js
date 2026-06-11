@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blind-edge-v9';
+const CACHE_NAME = 'blind-edge-v10';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -7,8 +7,13 @@ const APP_SHELL = [
   '/crypto.js',
   '/storage.js',
   '/hex.js',
+  '/qr.js',
   '/manifest.json',
-  '/logo.svg'
+  '/logo.svg',
+  '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png'
 ];
 
 // ------------------------------------------------------------------ //

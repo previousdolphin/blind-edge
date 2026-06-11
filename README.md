@@ -2,28 +2,65 @@
 
 # B.E.Chat — Blind-Edge Messenger
 
-> End-to-end encrypted, local-first messaging with a zero-knowledge relay.  
+> End-to-end encrypted, local-first messaging with a zero-knowledge relay.
 > No accounts. No plaintext on the wire. Deployable in under 5 minutes.
 
-**Built entirely with [Claude Code](https://claude.ai/code) in a single session** as a live demonstration of AI-assisted full-stack development. The cryptographic core, local database, relay API, and complete PWA were generated, wired together, debugged, and deployed without leaving the terminal.
+**Built entirely with [Claude Code](https://claude.ai/code)** as a live demonstration of AI-assisted full-stack development — and of a simple idea: a messenger where **everything lives on your device** and the server is a blind mailbox anyone can run.
 
-**Try it now:** [blind-edge.pages.dev](https://blind-edge.pages.dev) — works immediately with the shared demo relay. No sign-up required.
+**Try it now:** [blind-edge.pages.dev](https://blind-edge.pages.dev) — works immediately with the shared demo relay. No sign-up, no email, no phone number.
 
 ---
 
-## What the server can and cannot see
+## Try it — 60 seconds, two phones
 
-| Field | Server receives | Server can read |
+1. Open [blind-edge.pages.dev](https://blind-edge.pages.dev) on both phones
+2. Tap **Create my identity** → set a local password → write down your 12 words (or skip — disposable identities are a feature)
+3. On the "You're ready" screen, have your friend **scan your QR with their camera app** — it opens B.E.Chat with your key filled in
+4. Start messaging
+
+Not in the same room? Tap **+ Add → Share code**, get a 6-letter code, and say it out loud over a call. It works for 10 minutes and the relay only ever sees its hash.
+
+---
+
+## Install it like an app
+
+The site is a full PWA — installed, it launches full-screen, works offline, and the browser is far less likely to evict your data.
+
+| Platform | How |
+|---|---|
+| **iPhone / iPad** | Safari → **Share** (square-with-arrow) → **Add to Home Screen** → Add |
+| **Android** | Chrome shows an install prompt, or use **Menu → Install as an app** inside B.E.Chat |
+| **Desktop** | Chrome/Edge: install icon in the address bar, or **Menu → Install as an app** |
+
+> iOS note: Safari can evict site data after ~7 days of disuse. Installing to the Home Screen prevents that — and your 12 recovery words protect you regardless.
+
+---
+
+## What the relay can and cannot see
+
+| Field | Relay receives | Relay can read |
 |---|---|---|
 | Message content | Padded hex ciphertext | **Nothing** |
 | Sender | SHA-256 of their public key | A hash — no name, no identity |
 | Recipient | SHA-256 of their public key | A hash — no name, no identity |
 | Your password | Never transmitted | — |
-| Your private key | Never transmitted | — |
+| Your private keys | Never transmitted | — |
 | Your contacts | Never transmitted | — |
-| Message timing | Envelope `created_at` | When, not who or what |
+| Timing & size | Envelope `created_at`; length padded to 256-byte blocks | When and roughly how much — not who or what |
 
-The server is a **blind relay**. It accepts ciphertext addressed to a key hash and serves it back to whoever presents that hash. It cannot decrypt, cannot log identities, and has no user table.
+The relay is a **blind mailbox**. It accepts ciphertext addressed to a key hash and serves it back to whoever presents that hash. It cannot decrypt, has no user table, holds envelopes at most 24 hours, and rate-limits per IP. The app itself will show you the raw envelope it sends — **How it works → "Show me the actual bytes."**
+
+---
+
+## The recovery model
+
+This is the part most apps get wrong, so here it is plainly:
+
+- **Your 12 words are your identity.** Every new identity is derived from fresh BIP39 entropy. Restoring the words on any device reproduces the *exact same keys and address* — contacts can still reach you. View them any time via **ID → Recovery words** (they're stored encrypted inside your password-protected vault).
+- **Message history never leaves your devices.** That's the point: there is no server copy to recover — for you *or* for an attacker. Lose the device without a backup and the history is gone; the identity survives via the words.
+- **The JSON export** (**ID → Export backup file**) contains your encrypted keys only — not contacts, not messages. It's a second recovery path that also needs your App Password.
+- **No words, no export, lost device → identity is gone permanently.** Nobody can reset it, because nobody else has it.
+- **Burner mode is a feature.** Skip the backup, use an identity for a session, then **Menu → Delete this identity**. Fresh keys take five seconds — new address, clean slate. Old contacts can't reach the new you.
 
 ---
 
@@ -77,10 +114,12 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 | ECDH P-256 (ephemeral) | Per-message key agreement — sender-side forward secrecy |
 | ECDSA P-256 | Envelope signing — message authenticity |
 | HKDF SHA-256 | Key derivation — shared secret → AES key, bound to both public keys; also seed → deterministic keypair |
-| AES-256-GCM | Authenticated encryption of message content and group messages |
-| PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private keys at rest |
+| AES-256-GCM | Authenticated encryption of message content, group messages, and the identity vault |
+| PBKDF2 SHA-256 (600k rounds) | App Password → vault key for private keys + recovery entropy at rest |
 | PBKDF2 SHA-512 (2048 rounds) | BIP39 seed phrase → 64-byte seed (standard BIP39 derivation) |
-| SHA-256 | Public key → recipient hash (your "address"); discovery code → relay address |
+| SHA-256 | Public key → recipient hash (your "address"); share code → relay address |
+
+**QR key exchange** is an own-code, zero-dependency QR encoder (`public/qr.js`, byte mode, ECC L, versions 1–15, full mask selection per ISO 18004). The QR encodes a deep link (`https://…/#add=<publicKeys>`) so the other person's *native camera app* opens B.E.Chat with the key pre-filled — no in-app scanner required, and URL fragments never reach any server.
 
 ---
 
@@ -90,8 +129,9 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 |---|---|---|
 | Crypto | Web Crypto API (native) | No dependencies, no supply chain risk |
 | Local DB | sql.js + IndexedDB | SQLite in the browser, persistent across sessions |
-| Relay API | Any serverless platform | ~100 lines of JS — runs anywhere |
-| Remote DB | Any SQLite-compatible store | One table, two columns indexed |
+| QR | Own-code encoder (`qr.js`) | Zero dependencies, SVG output, verified against Apple Vision decoder |
+| Relay API | Any serverless platform | ~200 lines of JS — runs anywhere |
+| Remote DB | Any SQLite-compatible store | Two tiny tables |
 | Frontend | Vanilla JS ES Modules | No bundler, no framework, instant load |
 | PWA | Service Worker + Web App Manifest | Installable, offline-capable |
 
@@ -99,27 +139,9 @@ The server is a **blind relay**. It accepts ciphertext addressed to a key hash a
 
 ---
 
-## Try it — no setup required
-
-The app ships pre-configured with a shared demo relay:
-
-1. Open [blind-edge.pages.dev](https://blind-edge.pages.dev)
-2. Create an identity — or restore one from a 12-word seed phrase
-3. Tap **Key** → **Copy Key** — your key is two P-256 public keys joined by a colon (`ecdhKey:signingKey`). Share this string out-of-band with your contact (Signal, in person, etc.)
-4. Have them share their key string → tap **+ Add → By Key**, paste it, give them a name
-5. Start messaging
-
-> **Easier key exchange:** Tap **+ Add → By Code** to generate a one-time 6-character discovery code (valid 10 minutes). Share it verbally or over any channel. Your contact enters it on their side — keys are exchanged instantly without copying long hex strings. The code expires after 10 minutes; the relay only ever sees `SHA-256(code)`.
-
-> **Key format:** The combined key string is ~262 characters (`130 hex + : + 130 hex`). Both parties need the full string for signature verification. A 130-char ECDH-only key also works in legacy mode — encrypted but not signed.
-
-The demo relay is operational but **shared** — deploy your own for private production use.
-
----
-
 ## Deploy your own
 
-The relay is ~100 lines of plain JavaScript implementing two routes (`POST /api/send`, `GET /api/sync`) against a single SQLite table. It runs on any platform that can execute JS and talk to a database. The frontend is a static folder — deployable to any static host.
+The relay is ~200 lines of plain JavaScript implementing three routes against two SQLite tables. It runs on any platform that can execute JS and talk to a database. The frontend is a static folder — deployable to any static host.
 
 ### Relay options
 
@@ -201,6 +223,13 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # ← paste here
 npm run db:init
 ```
 
+**Verify it worked:**
+```bash
+cd worker && npx wrangler d1 execute blind-edge-db --remote \
+  --command "SELECT name FROM sqlite_master WHERE type='table'"
+# expect: envelopes, rendezvous
+```
+
 ### 6. Deploy the Worker
 
 ```bash
@@ -215,40 +244,62 @@ Deployed blind-edge-api triggers (0.77 sec)
   schedule: 0 */6 * * *
 ```
 
-### 7. Update allowed origins in `worker/wrangler.toml`
+**Verify it worked** (an empty sync against a dummy address):
+```bash
+curl "https://blind-edge-api.YOUR-SUBDOMAIN.workers.dev/api/sync?for=$(printf '0%.0s' {1..64})&since=0"
+# expect: {"envelopes":[]}
+```
+
+### 7. Create the Pages project (so you know your frontend URL)
+
+```bash
+npx wrangler pages project create blind-edge --production-branch main
+# your URL will be https://blind-edge-XXX.pages.dev (or your custom domain)
+```
+
+### 8. Update allowed origins in `worker/wrangler.toml` and redeploy
 
 ```toml
 [vars]
 ALLOWED_ORIGINS = "http://localhost:8080,https://YOUR-PROJECT.pages.dev"
 ```
 
-Then redeploy: `npm run worker:deploy`
+```bash
+npm run worker:deploy
+```
 
-### 8. Update the default relay URL in `public/app.js`
+### 9. Point the frontend at your relay and deploy it
 
+In `public/app.js`:
 ```js
 const DEMO_WORKER_URL = 'https://blind-edge-api.YOUR-SUBDOMAIN.workers.dev';
 ```
 
-### 9. Deploy the frontend
-
 ```bash
-# First time only
-npx wrangler pages project create blind-edge --production-branch main
-
-# Deploy
 npx wrangler pages deploy public --project-name blind-edge
 ```
 
-### 10. Test it
+### 10. Test it end-to-end
 
-Open your Pages URL in two different browsers. Create an identity on each, exchange public keys, add each other as contacts, and send a message. It should arrive within 15 seconds (the default sync interval).
+Open your Pages URL in two different browsers (or browser + phone). Create an identity on each, add each other via QR or share code, and send a message. It should arrive within 15 seconds (the default sync interval). The relay-status dot in the conversations header should read **relay connected**.
+
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Browser console shows CORS errors; sends fail with no relay response | `ALLOWED_ORIGINS` doesn't exactly match your Pages URL (scheme + host, no trailing slash). Fix `wrangler.toml`, redeploy the worker. |
+| `Send failed (403)` | Same CORS/origin issue, or the rate limiter (30 sends/min/IP) — wait a minute. |
+| "Code not found or expired" | Share codes live 10 minutes and are deleted on relay restart in dev. Get a fresh one. |
+| Stale UI after deploying | The service worker caches the app shell. Bump `CACHE_NAME` in `public/sw.js` for every deploy (this repo does), then reload twice. |
+| `npm run db:init` errors about binding | The `database_id` in `wrangler.toml` doesn't match step 3's output. |
+| Messages never arrive | Both clients must point at the **same relay** (Menu → Relay URL). Check the relay-status dot. |
+| Demo-relay messages vanish after a day | By design: the relay deletes all envelopes after 24h. Delivered messages are already on the recipient's device. |
 
 ---
 
 ## Relay API contract
 
-Any replacement relay must implement these routes. The `worker/index.js` is the reference implementation.
+Any replacement relay must implement these routes. `worker/index.js` is the reference implementation.
 
 **`POST /api/send`**
 
@@ -265,19 +316,19 @@ Returns `201 { ok: true, id: <rowId> }` or a 4xx error.
 
 **`GET /api/sync?for=<recipientHash>&since=<timestampMs>`**
 
-Returns `200 { envelopes: [{ id, senderHash, ciphertext, iv, createdAt }] }`.
+Returns `200 { envelopes: [{ id, senderHash, ciphertext, iv, createdAt }] }` (max 50, ascending by `createdAt`).
 
 **`POST /api/meet`** — ephemeral discovery (10-min TTL)
 
 ```json
-{ "hash": "<64-char hex SHA-256 of the 6-char code>", "ecdhPubHex": "...", "signPubHex": "..." }
+{ "meeting_hash": "<64-char hex SHA-256 of the 6-char code>", "public_key": "<ecdhHex:signHex>" }
 ```
 
-Returns `201 { ok: true }`. The relay never sees the raw code — only its hash.
+Returns `201 { ok: true, expires_at: <timestampMs> }`. The relay never sees the raw code — only its hash.
 
 **`GET /api/meet?hash=<64-char hex>`**
 
-Returns `200 { ecdhPubHex, signPubHex }` or `404` if expired/not found.
+Returns `200 { public_key }` or `404` if expired/not found.
 
 The relay must return CORS headers for browser clients. It needs no auth, no user table, and no knowledge of message content.
 
@@ -290,10 +341,14 @@ The relay must return CORS headers for browser clients. It needs no auth, no use
 npm run dev
 
 # In a second terminal — run the Worker locally (Cloudflare)
-cd worker && npx wrangler dev --remote
+cd worker && npx wrangler dev
 
 # The local Worker runs at http://localhost:8787
-# In the app, go to Settings → Worker URL → http://localhost:8787
+# In the app: Menu → Relay URL → http://localhost:8787
+```
+
+```bash
+npm test   # 36 tests: crypto protocol, BIP39 vectors, identity vault, QR encoder
 ```
 
 ---
@@ -306,7 +361,7 @@ main = "index.js"
 compatibility_date = "2024-12-01"
 
 [triggers]
-crons = ["0 */6 * * *"]   # prune envelopes older than 24h every 6 hours
+crons = ["0 */6 * * *"]   # prune envelopes older than 24h, every 6 hours
 
 [[d1_databases]]
 binding = "DB"
@@ -323,32 +378,38 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 ## Features
 
 - **Zero-knowledge relay** — server stores and forwards ciphertext it cannot read
-- **Local-first** — messages written to local IndexedDB instantly; works offline
+- **Local-first** — messages written to local IndexedDB instantly; works offline; relay-status indicator when it doesn't
 - **No accounts** — identity is a browser-generated keypair locked with your App Password
-- **Seed phrase recovery** — create or restore an identity from 12 BIP39 words + optional 13th-word passphrase; view your seed any time via Key → Show Seed Phrase
-- **Ephemeral discovery codes** — 6-character one-time codes (10-min TTL) for frictionless key exchange; share verbally, relay sees only SHA-256(code)
+- **Seed-first identities** — every identity is born from 12 BIP39 words; restore on any device → same keys, same address. Words are stored *encrypted inside the vault*, viewable post-unlock
+- **QR key exchange** — zero-dependency QR encoder; the other person scans with their native camera, no in-app scanner needed
+- **One-tap share codes** — 6-character codes (10-min TTL) for remote key exchange; relay sees only SHA-256(code); live countdown in the UI
+- **Burner mode** — first-class disposable identities: skip backup honestly, delete identity + local data in one tap
+- **"What's on this device" panel** — live inventory of exactly what's stored locally, including the honest plaintext-at-rest caveat
+- **"Show me the actual bytes"** — inspect the real envelope the app last sent to the relay
 - **Group chat** — multi-user groups with a shared AES-256-GCM key, creator-only admin, auto-accept invites; relay is unaware of groups
 - **Group key rotation** — new random key generated and distributed on every membership change; removed members cannot read future messages
-- **Sender-side forward secrecy** — per-message ephemeral ECDH; past messages safe if long-term key leaks
+- **Sender-side forward secrecy** — per-message ephemeral ECDH; past sent messages safe if long-term keys leak
 - **Signed envelopes** — ECDSA signature over ephemeral key + ciphertext; tampered messages rejected before decryption
 - **Replay protection** — monotonic counter inside every ciphertext; out-of-order or replayed messages dropped
 - **Message padding** — all payloads padded to 256-byte blocks; ciphertext length reveals nothing about message length
-- **Message autodestruct** — per-conversation TTL (1h / 12h / 24h / 7 days) prunes locally on schedule
-- **Server-side envelope TTL** — relay prunes envelopes older than 24 hours on a schedule; no unbounded accumulation
+- **Auto-delete** — per-conversation local expiry (1h / 12h / 24h / 7 days)
+- **Server-side envelope TTL** — relay prunes envelopes older than 24 hours; no unbounded accumulation
 - **IP rate limiting** — relay enforces 30 sends/min and 180 syncs/min per IP
-- **Identity portability** — export/import your encrypted key bundle to move between devices
-- **Secure export flow** — key export requires explicit checkbox confirmation with a risk warning
-- **Installable PWA** — add to home screen on iOS/Android/desktop
+- **Identity portability** — export/import your encrypted key bundle; gated behind an explicit risk warning
+- **Installable PWA** — real icons, install prompt on Android/desktop, guided Add-to-Home-Screen on iOS
 - **Identicons** — deterministic pixel-art avatars from public keys for fast out-of-band verification
 
 ---
 
-## Limitations (by design)
+## Limitations (honest, by design)
 
-- **Text only** — no image/file transfer
-- **Sender-side PFS only** — ephemeral ECDH protects the sender's past messages; full bidirectional PFS (à la Signal's Double Ratchet) would require prekey bundles published by the recipient
-- **Local history only** — message history does not sync between devices; only new messages arrive after import
-- **Shared relay** — the demo relay is shared infrastructure; run your own for production privacy
+- **Keys are trusted on first use** — no safety numbers yet. For high-stakes contacts, exchange QRs in person or compare identicons over a channel you trust.
+- **Sender-side PFS only** — ephemeral ECDH protects sent messages; full bidirectional PFS (à la Signal's Double Ratchet) would require prekey bundles published by the recipient.
+- **Local history is stored readable** — the App Password encrypts your keys, not the message database. Use OS disk encryption and a screen lock.
+- **Local history only** — message history does not sync between devices; a restored identity receives only new messages.
+- **Relays see metadata** — timing, padded sizes, IPs. The demo relay is shared infrastructure; run your own for production privacy.
+- **Text only** — no image/file transfer.
+- **Not audited** — this is an open-source protocol demo. Read `SECURITY.md` before trusting it with anything that matters.
 
 ---
 
@@ -356,22 +417,30 @@ MAX_CIPHERTEXT_LENGTH = "131072"
 
 ```
 blind-edge/
-├── public/              # Frontend — static, no build step
-│   ├── index.html       # App shell + all CSS
-│   ├── app.js           # Orchestration, sync engine, UI
-│   ├── crypto.js        # SecurityManager — all WebCrypto operations
-│   ├── bip39.js         # BIP39 wordlist, mnemonic encode/decode, seed derivation
-│   ├── hex.js           # Shared hex encoding with strict validation
-│   ├── storage.js       # StorageManager — sql.js + IndexedDB
-│   ├── sw.js            # Service worker (PWA caching)
-│   ├── logo.svg         # B.E.Chat logo
-│   └── manifest.json    # PWA manifest
-├── worker/              # Reference relay — Cloudflare Workers + D1
-│   ├── index.js         # POST /api/send  GET /api/sync  scheduled cleanup
-│   ├── schema.sql       # D1 schema (portable SQLite)
-│   └── wrangler.toml    # Cloudflare deployment config
+├── public/                  # Frontend — static, no build step
+│   ├── index.html           # App shell + all CSS + onboarding/trust copy
+│   ├── app.js               # Orchestration, onboarding flow, sync engine, UI
+│   ├── crypto.js            # SecurityManager — all WebCrypto operations
+│   ├── bip39.js             # Official 2048-word list, mnemonic encode/decode, seed derivation
+│   ├── qr.js                # Zero-dependency QR encoder (byte mode, ECC L, v1–15)
+│   ├── hex.js               # Shared hex encoding with strict validation
+│   ├── storage.js           # StorageManager — sql.js + IndexedDB, per-identity isolation
+│   ├── sw.js                # Service worker (PWA caching)
+│   ├── icon.svg / *.png     # App icons (regen recipe in CONTRIBUTING.md)
+│   ├── logo.svg             # B.E.Chat logo
+│   └── manifest.json        # PWA manifest
+├── worker/                  # Reference relay — Cloudflare Workers + D1
+│   ├── index.js             # /api/send  /api/sync  /api/meet  + scheduled cleanup
+│   ├── schema.sql           # D1 schema (portable SQLite)
+│   └── wrangler.toml        # Cloudflare deployment config
 ├── test/
-│   └── crypto.test.mjs  # 18 automated crypto tests (npm test)
+│   ├── crypto.test.mjs      # Protocol tests (HKDF binding, signatures, replay, padding)
+│   ├── bip39.test.mjs       # Official BIP39 vectors + round-trip fuzz
+│   ├── identity.test.mjs    # Seed-first determinism + vault round-trips + migration
+│   └── qr.test.mjs          # QR structural verification + RS math + inverse pipeline
+├── SECURITY.md              # Threat model, scope, reporting
+├── CONTRIBUTING.md          # Ground rules (zero deps, sw bumps, icon regen)
+├── LICENSE                  # MIT
 └── package.json
 ```
 
@@ -382,7 +451,7 @@ blind-edge/
 | Script | What it does |
 |---|---|
 | `npm run dev` | Serve `public/` on `localhost:8080` |
-| `npm test` | Run 18 automated crypto tests via node:test |
+| `npm test` | Run 36 automated tests via node:test |
 | `npm run db:create` | *(Cloudflare)* Create a D1 database named `blind-edge-db` |
 | `npm run db:init` | *(Cloudflare)* Push `worker/schema.sql` to the remote D1 database |
 | `npm run worker:dev` | *(Cloudflare)* Run the Worker locally |
@@ -390,25 +459,24 @@ blind-edge/
 
 ---
 
-## What Claude built in one session
+## What Claude built
 
-This entire project was generated by [Claude Code](https://claude.ai/code) from a natural-language specification — then iteratively hardened across follow-up sessions. The work covered:
+This entire project was generated by [Claude Code](https://claude.ai/code) from natural-language specifications, then iteratively hardened across follow-up sessions:
 
 - Full cryptographic protocol: PBKDF2 vault, ECDH, ECDHE (per-message ephemeral keys), ECDSA signing, HKDF key binding, AES-256-GCM, monotonic replay counters, 256-byte message padding — all native Web Crypto API, zero libraries
-- BIP39 seed phrase recovery: PBKDF2-SHA512 → HKDF → deterministic P-256 keypair derivation via PKCS8 DER trick (no EC math library)
-- Ephemeral discovery codes: 6-char one-time codes with SHA-256 relay registration, 10-min TTL, verbal out-of-band exchange
-- Multi-user group chat: shared AES-256-GCM key, key rotation on every membership change, creator-only admin, auto-accept invites, zero relay changes
-- Per-identity IndexedDB isolation: each identity's SQLite database keyed by its public key hash
-- Local SQLite via sql.js WASM with IndexedDB persistence (cross-browser, including Safari)
-- Reference relay implementation on Cloudflare Workers + D1 with parameterized queries, CORS validation, rate limiting, and scheduled TTL pruning
-- PWA manifest and service worker with cache-first shell + network-first API strategy
-- Complete UI: auth flows, contact management, live chat, group chat, settings, modals, toast notifications, identicons
-- Security hardening: identity export warning, per-conversation autodestruct, v1→v2 identity migration
-- 18-test automated suite via node:test
+- Seed-first identity: every identity derived from BIP39 entropy (PBKDF2-SHA512 → HKDF → deterministic P-256 keypairs via a PKCS8 DER trick, no EC math library), with recovery entropy sealed inside the encrypted vault
+- A zero-dependency QR encoder (Reed-Solomon over GF(256), full mask-penalty selection) verified against Apple's Vision decoder, plus camera-app deep links for key exchange
+- Onboarding built around informed consent: what was just created, where it lives, what the relay sees, what backup means — including a first-class disposable-identity path
+- Ephemeral share codes: 6-char one-time codes with SHA-256 relay registration, 10-min TTL
+- Multi-user group chat: shared AES-256-GCM key, key rotation on every membership change, zero relay changes
+- Per-identity IndexedDB isolation; local SQLite via sql.js WASM (cross-browser, including Safari)
+- Reference relay on Cloudflare Workers + D1 with parameterized queries, CORS validation, rate limiting, scheduled TTL pruning
+- Installable PWA: icons, manifest, install prompts, iOS guidance, cache-first shell + network-first API service worker
+- A 36-test suite (node:test) including official BIP39 conformance vectors — which caught and fixed two real recovery-breaking bugs (a truncated wordlist and a bit-packing error)
 - B.E.Chat branding: SVG logo with chrome bubble letters and blindfolded hero
 
 ---
 
 ## License
 
-MIT — fork it, deploy it, improve it.
+[MIT](LICENSE) — fork it, deploy it, improve it.

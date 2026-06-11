@@ -1,8 +1,18 @@
 {
   "name": "blind-edge",
-  "version": "0.1.0",
+  "version": "1.5.0",
+  "description": "B.E.Chat — end-to-end encrypted, local-first messaging PWA with a zero-knowledge relay. No accounts, no runtime dependencies.",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/previousdolphin/blind-edge.git"
+  },
+  "homepage": "https://blind-edge.pages.dev",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "npx serve public -p 8080",
     "test": "node --test test/*.test.mjs",

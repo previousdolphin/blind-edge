@@ -1,3 +1,16 @@
+// The blind relay — a zero-knowledge store-and-forward mailbox.
+//
+// This process NEVER sees plaintext, names, passwords, or private keys.
+// The complete list of what it stores (worker/schema.sql):
+//   envelopes:  recipient_hash, sender_hash (SHA-256 of public keys — numbers,
+//               not identities), ciphertext (opaque hex), iv, created_at.
+//               Pruned after 24h by the cron trigger below.
+//   rendezvous: SHA-256(share code) → public key, for 10 minutes. The code
+//               itself never reaches this server.
+// What it can infer: traffic timing, padded ciphertext sizes, and client IPs
+// (used only for rate limiting). Run your own relay to control even that —
+// it's this one file plus schema.sql.
+
 // In-memory rate limiter (per isolate instance — provides friction, not a hard guarantee)
 const BUCKETS = new Map(); // IP → { sends: number, syncs: number, resetAt: number }
 const SEND_LIMIT = 30;

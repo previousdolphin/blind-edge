@@ -1,7 +1,11 @@
+// Main orchestration: onboarding/auth flow, sync loop, contact & group
+// management, and all UI rendering. Crypto lives in crypto.js, persistence in
+// storage.js, QR encoding in qr.js — this file wires them to the DOM.
 import { SecurityManager } from './crypto.js';
 import { StorageManager } from './storage.js';
 import { hexToBytes, bytesToHex } from './hex.js';
 import { entropyToMnemonic, mnemonicToEntropy, mnemonicToSeed, validateMnemonicWords } from './bip39.js';
+import { encodeToSvg } from './qr.js';
 
 // Shared demo relay — works out of the box; replace with your own in Settings
 const DEMO_WORKER_URL = 'https://blind-edge-api.jdo-8af.workers.dev';
@@ -52,6 +56,7 @@ const state = {
   ecdhPubKeyHex: null,
   signPubKeyHex: null,
   keyHash: null,
+  entropyHex: null,          // BIP39 entropy behind the recovery words (null for pre-seed identities)
   storage: null,
   contacts: [],
   groups: [],
@@ -60,7 +65,17 @@ const state = {
   activeGroupMembers: null,
   syncTimer: null,
   syncRunning: false,
+  relayStatus: 'unknown',    // 'ok' | 'offline' | 'unknown'
+  lastEnvelope: null,        // most recent /api/send payload, for the "show me the bytes" inspector
 };
+
+// Identity generated during onboarding, held here until the user finishes the
+// seed-backup step; bootApp() consumes it.
+let _pendingOnboard = null;
+// Captured beforeinstallprompt event (Android/desktop Chrome).
+let _deferredInstallPrompt = null;
+// Key bundle arriving via a scanned QR deep link (#add=...), applied after unlock.
+let _pendingDeepLinkKey = null;
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -100,7 +115,7 @@ function setLoading(btn, yes, label) {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function showAuthSub(sub) {
-  ['unlock', 'setup', 'import', 'mnemonic'].forEach(s =>
+  ['welcome', 'unlock', 'setup', 'import', 'mnemonic', 'seed-backup', 'ready'].forEach(s =>
     $id(`auth-${s}`).classList.toggle('hidden', s !== sub)
   );
   ['unlock-error', 'setup-error', 'import-error', 'mnemonic-error'].forEach(clearErr);
@@ -130,6 +145,9 @@ async function doUnlock() {
   }
 }
 
+// Seed-first identity creation: every new identity is derived from fresh
+// BIP39 entropy, so every identity has 12 recovery words. Restoring those
+// words on any device reproduces the exact same keys and address.
 async function doCreate() {
   const password = $id('setup-password').value;
   const confirm = $id('setup-password-confirm').value;
@@ -142,20 +160,63 @@ async function doCreate() {
   setLoading(btn, true, 'Generating…');
 
   try {
+    const entropy = crypto.getRandomValues(new Uint8Array(16));   // 128 bits → 12 words
+    const words = await entropyToMnemonic(entropy);
+    const seed64 = await mnemonicToSeed(words, '');
+    const { ecdh, sign } = await SecurityManager.deriveIdentityFromSeed(seed64);
+
     const salt = SecurityManager.generateSalt();
     const masterKey = await SecurityManager.deriveKey(password, salt);
-    const ecdhKeypair = await SecurityManager.generateIdentity();
-    const signKeypair = await SecurityManager.generateSigningIdentity();
-    const bundle = await SecurityManager.exportIdentityBundle(ecdhKeypair, signKeypair, masterKey, salt);
+    const entropyHex = bytesToHex(entropy);
+    const bundle = await SecurityManager.exportIdentityBundle(ecdh, sign, masterKey, salt, entropyHex);
     localStorage.setItem('blind-edge:identity', bundle);
+
     $id('setup-password').value = '';
     $id('setup-password-confirm').value = '';
-    await bootApp({ ecdh: ecdhKeypair, sign: signKeypair, migratedFromV1: false }, masterKey, salt);
+
+    _pendingOnboard = { identity: { ecdh, sign, migratedFromV1: false, entropyHex, entropyWasPlaintext: false }, masterKey, salt };
+    showSeedBackup(words);
   } catch (e) {
     showErr('setup-error', 'Identity generation failed: ' + e.message);
   } finally {
-    setLoading(btn, false, 'Generate Identity');
+    setLoading(btn, false, 'Generate my keys');
   }
+}
+
+// ─── Onboarding steps (seed backup → ready → boot) ───────────────────────────
+
+function showSeedBackup(words) {
+  $id('onboard-seed-grid').innerHTML = words.map((w, i) =>
+    `<div class="seed-word"><span class="seed-num">${i + 1}</span><span class="seed-text">${esc(w)}</span></div>`
+  ).join('');
+  $id('onboard-seed-check').checked = false;
+  $id('btn-onboard-continue').disabled = true;
+  $id('burner-panel').classList.add('hidden');
+  showAuthSub('seed-backup');
+}
+
+async function showReady() {
+  // Words are no longer needed in the DOM — clear them before moving on.
+  $id('onboard-seed-grid').innerHTML = '';
+
+  const { identity } = _pendingOnboard;
+  const ecdhPubHex = await SecurityManager.exportPublicKeyHex(identity.ecdh.publicKey);
+  const signPubHex = await SecurityManager.exportSignPublicKeyHex(identity.sign.publicKey);
+  const keyHash = await SecurityManager.getKeyHash(identity.ecdh.publicKey);
+
+  $id('ready-identicon').innerHTML = generateIdenticon(keyHash, 72);
+  $id('ready-address').textContent = keyHash.slice(0, 16) + '…' + keyHash.slice(-16);
+  try {
+    $id('ready-qr').innerHTML = encodeToSvg(shareDeepLink(ecdhPubHex, signPubHex));
+  } catch { $id('ready-qr').classList.add('hidden'); }
+
+  showAuthSub('ready');
+}
+
+async function finishOnboarding() {
+  const pending = _pendingOnboard;
+  _pendingOnboard = null;
+  await bootApp(pending.identity, pending.masterKey, pending.salt);
 }
 
 async function doImport() {
@@ -194,6 +255,7 @@ async function bootApp(identity, masterKey, salt) {
   state.ecdhPubKeyHex = await SecurityManager.exportPublicKeyHex(identity.ecdh.publicKey);
   state.signPubKeyHex = await SecurityManager.exportSignPublicKeyHex(identity.sign.publicKey);
   state.keyHash = await SecurityManager.getKeyHash(identity.ecdh.publicKey);
+  state.entropyHex = identity.entropyHex || null;
 
   // v1 → v2 identity bundle migration: a fresh signing keypair was minted
   // during import; persist the upgraded bundle so the user doesn't get a new
@@ -204,6 +266,16 @@ async function bootApp(identity, masterKey, salt) {
     );
     localStorage.setItem('blind-edge:identity', bundle);
     setTimeout(() => showToast('Identity upgraded to v2 (signing key added).', 'info'), 500);
+  }
+
+  // Pre-v1.5 bundles stored recovery entropy as plaintext next to the
+  // encrypted keys. Now that we have the master key (post-unlock only),
+  // rewrap the entropy inside the encrypted vault.
+  if (identity.entropyWasPlaintext) {
+    const bundle = await SecurityManager.exportIdentityBundle(
+      identity.ecdh, identity.sign, masterKey, salt, identity.entropyHex
+    );
+    localStorage.setItem('blind-edge:identity', bundle);
   }
 
   state.storage = new StorageManager();
@@ -223,6 +295,56 @@ async function bootApp(identity, masterKey, salt) {
   const serverUrl = await state.storage.getSetting('serverUrl');
   const syncInterval = parseInt((await state.storage.getSetting('syncInterval')) || '15', 10);
   startSync(serverUrl, syncInterval);
+
+  // A QR deep link scanned before unlock lands here.
+  if (_pendingDeepLinkKey) {
+    const key = _pendingDeepLinkKey;
+    _pendingDeepLinkKey = null;
+    openAddContactWithKey(key);
+  }
+}
+
+// ─── Share links & relay status ───────────────────────────────────────────────
+
+// QR payload: a URL the native camera app opens directly. Only PUBLIC keys
+// travel in it; the fragment never reaches any server (fragments aren't sent
+// in HTTP requests) and is stripped from the address bar after consumption.
+function shareDeepLink(ecdhPubHex, signPubHex) {
+  return `${location.origin}/#add=${ecdhPubHex}:${signPubHex}`;
+}
+
+function consumeDeepLink() {
+  const m = location.hash.match(/^#add=([0-9a-fA-F:]+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  const key = m[1].toLowerCase();
+  if (state.keyHash) openAddContactWithKey(key);
+  else {
+    _pendingDeepLinkKey = key;
+    showToast('Contact key received — unlock to add them.', 'info');
+  }
+}
+
+function openAddContactWithKey(key) {
+  if (`${state.ecdhPubKeyHex}:${state.signPubKeyHex}` === key) {
+    showToast("That's your own key.", 'info');
+    return;
+  }
+  openAddContactModal();
+  $id('contact-key-input').value = key;
+  $id('contact-name-input').focus();
+  showToast('Key filled in from the scanned code — just add a name.', 'success');
+}
+
+function setRelayStatus(status) {
+  if (state.relayStatus === status) return;
+  state.relayStatus = status;
+  const el = $id('relay-status');
+  el.classList.toggle('ok', status === 'ok');
+  el.classList.toggle('offline', status === 'offline');
+  $id('relay-status-text').textContent =
+    status === 'ok' ? 'relay connected' :
+    status === 'offline' ? 'relay unreachable — will retry' : '';
 }
 
 // ─── Contacts ─────────────────────────────────────────────────────────────────
@@ -257,7 +379,7 @@ function renderContactList() {
         <div class="contact-item" data-id="${c.id}">
           <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
           <div class="contact-info">
-            <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="No signing key — signature verification disabled">legacy</span>' : ''}</div>
+            <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="This contact was added without a signing key, so messages from them can\'t be authenticity-verified. Ask them to re-share their full key.">no signatures</span>' : ''}</div>
             <div class="contact-last-msg">${c.lastMessage ? esc(c.lastMessage.slice(0, 60)) : 'No messages yet'}</div>
           </div>
           <div class="contact-meta">
@@ -301,7 +423,7 @@ const TTL_OPTIONS = [
 ];
 
 function formatTTL(seconds) {
-  if (!seconds) return 'Timer';
+  if (!seconds) return 'Auto-delete';
   if (seconds < 3600)  return `${seconds / 60}m`;
   if (seconds < 86400) return `${seconds / 3600}h`;
   return `${seconds / 86400}d`;
@@ -328,7 +450,7 @@ async function openChat(contactId) {
     ttlBtn.textContent = formatTTL(contact.ttl_seconds);
     ttlBtn.classList.add('ttl-active');
   } else {
-    ttlBtn.textContent = 'Timer';
+    ttlBtn.textContent = 'Auto-delete';
     ttlBtn.classList.remove('ttl-active');
   }
 
@@ -357,7 +479,7 @@ function goBack() {
   $id('btn-ttl').classList.add('hidden');
   $id('ttl-notice').classList.add('hidden');
   $id('btn-group-members').classList.add('hidden');
-  $id('app-title').textContent = 'Blind-Edge';
+  $id('app-title').textContent = 'B.E.Chat';
   refreshContacts();
 }
 
@@ -396,12 +518,15 @@ async function renderGroupMessages() {
   }).join('');
 }
 
+// Human labels for message states (DB values stay 'pending'/'delivered'/'read').
+const STATUS_LABELS = { pending: 'queued — will retry', delivered: 'sent', read: 'read' };
+
 async function renderMessages() {
   const msgs = await state.storage.getMessages(state.activeContactId);
   $id('message-list').innerHTML = msgs.map(m => `
     <div class="message ${esc(m.direction)}">
       <div class="bubble">${esc(m.plaintext)}</div>
-      ${m.direction === 'out' ? `<div class="msg-status ${esc(m.status)}">${esc(m.status)}</div>` : ''}
+      ${m.direction === 'out' ? `<div class="msg-status ${esc(m.status)}">${esc(STATUS_LABELS[m.status] || m.status)}</div>` : ''}
     </div>
   `).join('');
 }
@@ -427,10 +552,12 @@ async function sendGroupMessage() {
     );
     const serverUrl = (await state.storage.getSetting('serverUrl')) || '';
     if (serverUrl) {
+      const envelope = { recipient_hash: group.groupHash, sender_hash: state.keyHash, ciphertext, iv };
+      recordEnvelope(envelope);
       await fetch(`${serverUrl}/api/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient_hash: group.groupHash, sender_hash: state.keyHash, ciphertext, iv }),
+        body: JSON.stringify(envelope),
       });
     }
     await state.storage.addGroupMessage(state.activeGroupId, state.keyHash, text, true, Date.now(), `local-${Date.now()}-${Math.random()}`);
@@ -475,10 +602,16 @@ async function sendMessage() {
   }
 }
 
+// Keep the most recent outgoing envelope so the "show me the actual bytes"
+// inspector can display exactly what the relay receives.
+function recordEnvelope(envelope) {
+  state.lastEnvelope = envelope;
+}
+
 async function trySendToServer(msgId, contact, ciphertext, iv) {
   const serverUrl = (await state.storage.getSetting('serverUrl')) || '';
   if (!serverUrl) {
-    showToast('Set Worker URL in Settings to send messages.', 'info');
+    showToast('Set a relay URL in Menu to send messages.', 'info');
     return;
   }
 
@@ -486,13 +619,16 @@ async function trySendToServer(msgId, contact, ciphertext, iv) {
     const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
     const recipientHash = await SecurityManager.getKeyHash(recipientPubKey);
 
+    const envelope = { recipient_hash: recipientHash, sender_hash: state.keyHash, ciphertext, iv };
+    recordEnvelope(envelope);
     const res = await fetch(`${serverUrl}/api/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipient_hash: recipientHash, sender_hash: state.keyHash, ciphertext, iv }),
+      body: JSON.stringify(envelope),
     });
 
     if (res.ok) {
+      setRelayStatus('ok');
       await state.storage.markDelivered(msgId);
       if (state.activeContactId === contact.id) await renderMessages();
     } else {
@@ -500,7 +636,8 @@ async function trySendToServer(msgId, contact, ciphertext, iv) {
       showToast(`Send failed (${res.status}): ${body.error || 'unknown error'}`, 'error');
     }
   } catch (e) {
-    showToast('Network error — message will retry on next sync.', 'error');
+    setRelayStatus('offline');
+    showToast('Relay unreachable — message is queued and will retry.', 'error');
   }
 }
 
@@ -533,6 +670,7 @@ async function runSync(serverUrl) {
     const since = parseInt((await state.storage.getSetting('lastSync')) || '0', 10);
     const res = await fetch(`${serverUrl}/api/sync?for=${state.keyHash}&since=${since}`);
     if (!res.ok) return;
+    setRelayStatus('ok');
 
     const { envelopes } = await res.json();
     let maxTs = since;
@@ -605,7 +743,9 @@ async function runSync(serverUrl) {
       }
     }
   } catch {
-    // Network failure — silent
+    // Network failure — surface it in the relay-status indicator instead of
+    // failing silently; queued messages retry on the next tick.
+    setRelayStatus('offline');
   } finally {
     state.syncRunning = false;
   }
@@ -915,14 +1055,50 @@ function openIdentityModal() {
   $id('identity-pubkey').textContent = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
   $id('identity-hash').textContent = state.keyHash;
   $id('identity-identicon').innerHTML = generateIdenticon(state.keyHash || state.ecdhPubKeyHex, 72);
-  const bundle = JSON.parse(localStorage.getItem('blind-edge:identity') || 'null');
-  $id('btn-show-seed').classList.toggle('hidden', !bundle?.entropy);
+  try {
+    $id('identity-qr').innerHTML = encodeToSvg(shareDeepLink(state.ecdhPubKeyHex, state.signPubKeyHex));
+  } catch { $id('identity-qr').classList.add('hidden'); }
+  // Recovery words exist only for seed-derived identities (entropy is held in
+  // memory post-unlock; it lives encrypted inside the vault at rest).
+  $id('btn-show-seed').classList.toggle('hidden', !state.entropyHex);
+  $id('identity-no-seed-note').classList.toggle('hidden', !!state.entropyHex);
   openModal('modal-identity');
 }
 
+function fmtBytes(n) {
+  if (n == null) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 async function openSettingsModal() {
+  if (!state.storage) return; // locked — header isn't reachable, but guard anyway
   $id('setting-server-url').value = (await state.storage.getSetting('serverUrl')) || '';
   $id('setting-sync-interval').value = (await state.storage.getSetting('syncInterval')) || '15';
+
+  // "On this device" — a live, honest inventory of everything stored here.
+  const bundleBytes = (localStorage.getItem('blind-edge:identity') || '').length;
+  $id('stat-identity').textContent = fmtBytes(bundleBytes);
+  try {
+    const stats = await state.storage.getStats();
+    $id('stat-messages-label').textContent =
+      `${stats.messages} message${stats.messages === 1 ? '' : 's'}, ${stats.contacts} contact${stats.contacts === 1 ? '' : 's'}${stats.groups ? `, ${stats.groups} group${stats.groups === 1 ? '' : 's'}` : ''} (stored readable)`;
+    $id('stat-db').textContent = fmtBytes(stats.dbBytes);
+  } catch { $id('stat-db').textContent = '—'; }
+  try {
+    const est = await navigator.storage?.estimate?.();
+    $id('stat-total').textContent = est ? fmtBytes(est.usage) : '—';
+  } catch { $id('stat-total').textContent = '—'; }
+
+  // Install affordances: Android/desktop get the captured prompt; iOS Safari
+  // gets instructions; already-installed gets nothing.
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  $id('btn-install-app').classList.toggle('hidden', !_deferredInstallPrompt);
+  $id('btn-ios-install').classList.toggle('hidden', !(isIos && !standalone));
+  $id('install-section').classList.toggle('hidden', standalone || (!_deferredInstallPrompt && !isIos));
+
   openModal('modal-settings');
 }
 
@@ -1014,9 +1190,10 @@ function openSeedPhraseModal() {
 }
 
 async function doRevealSeedPhrase() {
-  const bundle = JSON.parse(localStorage.getItem('blind-edge:identity') || 'null');
-  if (!bundle?.entropy) return;
-  const words = entropyToMnemonic(hexToBytes(bundle.entropy));
+  // Entropy is decrypted into memory at unlock; at rest it lives inside the
+  // password-encrypted vault (see crypto.js exportIdentityBundle).
+  if (!state.entropyHex) return;
+  const words = await entropyToMnemonic(hexToBytes(state.entropyHex));
   const grid = $id('seed-phrase-words');
   grid.innerHTML = words.map((w, i) =>
     `<div class="seed-word"><span class="seed-num">${i + 1}</span><span class="seed-text">${w}</span></div>`
@@ -1036,8 +1213,11 @@ async function doImportFromMnemonic() {
   if (!validateMnemonicWords(words)) { showErr('mnemonic-error', 'One or more words are not in the BIP39 word list.'); return; }
   if (newPassword.length < 8) { showErr('mnemonic-error', 'App Password must be at least 8 characters.'); return; }
 
+  // NOTE: must await — an unawaited call here once let invalid checksums
+  // through (the rejection escaped the try/catch) and stored a Promise where
+  // entropy bytes belonged.
   let entropy;
-  try { entropy = mnemonicToEntropy(words); } catch {
+  try { entropy = await mnemonicToEntropy(words); } catch {
     showErr('mnemonic-error', 'Invalid seed phrase — checksum mismatch.'); return;
   }
 
@@ -1048,15 +1228,14 @@ async function doImportFromMnemonic() {
     const { ecdh, sign } = await SecurityManager.deriveIdentityFromSeed(seed64);
     const salt = SecurityManager.generateSalt();
     const masterKey = await SecurityManager.deriveKey(newPassword, salt);
-    const bundleStr = await SecurityManager.exportIdentityBundle(ecdh, sign, masterKey, salt);
-    const bundle = JSON.parse(bundleStr);
-    bundle.entropy = bytesToHex(entropy);
-    localStorage.setItem('blind-edge:identity', JSON.stringify(bundle));
+    const entropyHex = bytesToHex(entropy);
+    const bundleStr = await SecurityManager.exportIdentityBundle(ecdh, sign, masterKey, salt, entropyHex);
+    localStorage.setItem('blind-edge:identity', bundleStr);
     $id('mnemonic-input').value = '';
     $id('mnemonic-passphrase').value = '';
     $id('mnemonic-new-password').value = '';
-    await bootApp({ ecdh, sign, migratedFromV1: false }, masterKey, salt);
-    showToast('Identity restored from seed phrase.', 'success');
+    await bootApp({ ecdh, sign, migratedFromV1: false, entropyHex, entropyWasPlaintext: false }, masterKey, salt);
+    showToast('Identity restored — same keys, same address.', 'success');
   } catch (e) {
     showErr('mnemonic-error', 'Restore failed: ' + e.message);
   } finally {
@@ -1064,49 +1243,63 @@ async function doImportFromMnemonic() {
   }
 }
 
-// ─── Discovery Code ────────────────────────────────────────────────────────────
+// ─── Share Code (discovery) ───────────────────────────────────────────────────
 
-let _myDiscoveryCode = null;
+let _codeCountdownTimer = null;
 
 async function _hashCode(code) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code.toUpperCase()));
   return bytesToHex(new Uint8Array(buf));
 }
 
-function generateDiscoveryCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// One click: generate a 6-char code AND register its hash with the relay.
+// (The old two-step Generate → Register flow confused everyone.)
+async function getShareCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 — easy to say out loud
   const bytes = crypto.getRandomValues(new Uint8Array(6));
-  _myDiscoveryCode = Array.from(bytes, b => chars[b % chars.length]).join('');
-  $id('my-code-display').textContent = _myDiscoveryCode;
-  $id('my-code-section').classList.remove('hidden');
-  $id('discovery-expiry').classList.add('hidden');
-  $id('btn-register-code').disabled = false;
-}
+  const code = Array.from(bytes, b => chars[b % chars.length]).join('');
 
-async function registerDiscoveryCode() {
-  if (!_myDiscoveryCode) return;
-  const hash = await _hashCode(_myDiscoveryCode);
-  const pubKey = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
-  const serverUrl = await state.storage.getSetting('serverUrl') || DEMO_WORKER_URL;
-  const btn = $id('btn-register-code');
-  setLoading(btn, true, 'Registering…');
+  const btn = $id('btn-get-code');
+  setLoading(btn, true, 'Getting code…');
   try {
+    const hash = await _hashCode(code);
+    const pubKey = `${state.ecdhPubKeyHex}:${state.signPubKeyHex}`;
+    const serverUrl = await state.storage.getSetting('serverUrl') || DEMO_WORKER_URL;
     const res = await fetch(`${serverUrl}/api/meet`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ meeting_hash: hash, public_key: pubKey }),
     });
-    if (!res.ok) throw new Error('Server error');
+    if (!res.ok) throw new Error('relay error');
     const { expires_at } = await res.json();
-    const mins = Math.max(1, Math.round((expires_at - Date.now()) / 60000));
-    $id('discovery-expiry').textContent = `Active for ~${mins} min`;
-    $id('discovery-expiry').classList.remove('hidden');
-    showToast('Code registered — share it verbally', 'success');
+
+    $id('my-code-display').textContent = code;
+    $id('my-code-section').classList.remove('hidden');
+    startCodeCountdown(expires_at);
+    showToast('Code is live — tell them now.', 'success');
   } catch (e) {
-    showToast('Registration failed: ' + e.message, 'error');
+    showToast('Could not get a code: ' + e.message, 'error');
   } finally {
-    setLoading(btn, false, 'Register');
+    setLoading(btn, false, 'Get a share code');
   }
+}
+
+function startCodeCountdown(expiresAt) {
+  const el = $id('code-countdown');
+  el.classList.remove('hidden');
+  clearInterval(_codeCountdownTimer);
+  const tick = () => {
+    const ms = expiresAt - Date.now();
+    if (ms <= 0) {
+      el.textContent = 'expired — get a new one';
+      clearInterval(_codeCountdownTimer);
+      return;
+    }
+    const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+    el.textContent = `expires in ${m}:${String(s).padStart(2, '0')}`;
+  };
+  tick();
+  _codeCountdownTimer = setInterval(tick, 1000);
 }
 
 async function lookupDiscoveryCode() {
@@ -1128,7 +1321,7 @@ async function lookupDiscoveryCode() {
     await state.storage.addContact(name, ecdhHex, signHex || null);
     closeModal('modal-add-contact');
     await refreshContacts();
-    showToast(`${name} added via discovery code`, 'success');
+    showToast(`${name} added via share code`, 'success');
   } catch (e) {
     if (!$id('lookup-error').textContent) showToast('Lookup failed: ' + e.message, 'error');
   } finally {
@@ -1137,6 +1330,15 @@ async function lookupDiscoveryCode() {
 }
 
 async function downloadDB() {
+  // The export is the raw SQLite file — message history in READABLE form,
+  // unlike the identity backup. Make sure the user knows what they're holding.
+  const ok = confirm(
+    'Download your message database?\n\n' +
+    'This file contains your entire message history UNENCRYPTED — unlike your ' +
+    'identity backup, it is not protected by your App Password. Anyone who ' +
+    'gets the file can read everything. Store it accordingly.'
+  );
+  if (!ok) return;
   try {
     const data = state.storage._db.export();
     const a = document.createElement('a');
@@ -1191,12 +1393,12 @@ async function saveChatSettings() {
     ttlBtn.classList.add('ttl-active');
     notice.textContent = `Messages auto-delete after ${formatTTL(_selectedTTL)}`;
     notice.classList.remove('hidden');
-    showToast(`Autodestruct set to ${TTL_OPTIONS.find(o => o.value === _selectedTTL)?.label}`, 'success');
+    showToast(`Auto-delete set to ${TTL_OPTIONS.find(o => o.value === _selectedTTL)?.label} (this device only)`, 'success');
   } else {
-    ttlBtn.textContent = 'Timer';
+    ttlBtn.textContent = 'Auto-delete';
     ttlBtn.classList.remove('ttl-active');
     notice.classList.add('hidden');
-    showToast('Autodestruct off', 'info');
+    showToast('Auto-delete off', 'info');
   }
 
   await renderMessages();
@@ -1215,10 +1417,10 @@ function lockSession() {
 
   Object.assign(state, {
     masterKey: null, ecdhKeypair: null, signKeypair: null,
-    ecdhPubKeyHex: null, signPubKeyHex: null, keyHash: null,
+    ecdhPubKeyHex: null, signPubKeyHex: null, keyHash: null, entropyHex: null,
     storage: null, contacts: [], groups: [],
     activeContactId: null, activeGroupId: null, activeGroupMembers: null,
-    syncTimer: null, syncRunning: false,
+    syncTimer: null, syncRunning: false, relayStatus: 'unknown', lastEnvelope: null,
   });
 
   closeModal('modal-settings');
@@ -1227,20 +1429,106 @@ function lockSession() {
   $id('unlock-password').value = '';
 
   const hasIdentity = !!localStorage.getItem('blind-edge:identity');
-  showAuthSub(hasIdentity ? 'unlock' : 'setup');
-  showToast('Session locked', 'info');
+  showAuthSub(hasIdentity ? 'unlock' : 'welcome');
+  showToast('Locked — keys cleared from memory. Your data stays on this device.', 'info');
+}
+
+// The honest companion to burner mode: actually remove this identity and its
+// message database from the device. (Lock, by contrast, removes nothing —
+// it only clears keys from memory.)
+async function deleteIdentityFromDevice() {
+  const sure = confirm(
+    'Delete this identity from this device?\n\n' +
+    'Your keys and your entire message history here will be erased. ' +
+    'Without your 12 recovery words or a backup file, this identity is gone forever ' +
+    'and contacts will not be able to reach you.\n\nThis cannot be undone.'
+  );
+  if (!sure) return;
+
+  const keyHash = state.keyHash;
+  stopSync();
+  if (state.storage) await state.storage.close().catch(() => {});
+  try { await StorageManager.deleteIdentityData(keyHash); } catch (_) {}
+  localStorage.removeItem('blind-edge:identity');
+
+  closeModal('modal-settings');
+  showToast('Identity deleted. Fresh start any time.', 'success');
+  setTimeout(() => location.reload(), 800);
 }
 
 // ─── Wire events ──────────────────────────────────────────────────────────────
 
+function openAddContactModal() {
+  // Reset to the QR/key tab
+  $id('section-by-key').classList.remove('hidden');
+  $id('section-by-code').classList.add('hidden');
+  $id('tab-by-key').classList.add('active');
+  $id('tab-by-code').classList.remove('active');
+  clearErr('contact-error');
+  clearErr('lookup-error');
+  $id('my-code-section').classList.add('hidden');
+  $id('code-countdown').classList.add('hidden');
+  clearInterval(_codeCountdownTimer);
+  try {
+    $id('add-contact-qr').innerHTML = encodeToSvg(shareDeepLink(state.ecdhPubKeyHex, state.signPubKeyHex));
+  } catch { $id('add-contact-qr').classList.add('hidden'); }
+  openModal('modal-add-contact');
+}
+
+function openAboutModal() {
+  // "Show me the actual bytes" — render the most recent real envelope this
+  // app sent. It is the user's own ciphertext; there is nothing to leak.
+  const dump = $id('envelope-dump');
+  if (state.lastEnvelope) {
+    const e = state.lastEnvelope;
+    const shortCt = e.ciphertext.length > 600
+      ? e.ciphertext.slice(0, 600) + `… (${e.ciphertext.length} hex chars total)`
+      : e.ciphertext;
+    dump.textContent =
+      `POST /api/send\n{\n  "recipient_hash": "${e.recipient_hash}",\n  "sender_hash": "${e.sender_hash}",\n  "iv": "${e.iv}",\n  "ciphertext": "${shortCt}"\n}\n\nThat's everything. No names, no text, no keys.`;
+  } else {
+    dump.textContent = 'Nothing sent yet this session. Send a message, then look again.';
+  }
+  openModal('modal-about');
+}
+
 function wireEvents() {
+  // Welcome / onboarding
+  $id('btn-welcome-create').addEventListener('click', () => showAuthSub('setup'));
+  $id('link-welcome-import').addEventListener('click', () => showAuthSub('import'));
+  $id('link-about-welcome').addEventListener('click', openAboutModal);
+  $id('onboard-seed-check').addEventListener('change', e => {
+    $id('btn-onboard-continue').disabled = !e.target.checked;
+  });
+  $id('btn-onboard-continue').addEventListener('click', showReady);
+  $id('btn-onboard-skip').addEventListener('click', () => {
+    $id('burner-panel').classList.toggle('hidden');
+  });
+  $id('btn-onboard-skip-confirm').addEventListener('click', showReady);
+  $id('btn-onboard-finish').addEventListener('click', finishOnboarding);
+
   // Auth navigation
   $id('btn-unlock').addEventListener('click', doUnlock);
   $id('unlock-password').addEventListener('keydown', e => { if (e.key === 'Enter') doUnlock(); });
-  $id('link-setup').addEventListener('click', () => showAuthSub('setup'));
+  $id('link-setup').addEventListener('click', () => {
+    // From the unlock screen an identity already exists on this device —
+    // creating a new one overwrites it. Make that explicit.
+    const ok = confirm(
+      'This device already stores an identity. Creating a fresh one REPLACES it.\n\n' +
+      'Without its 12 recovery words or a backup file, the current identity ' +
+      'cannot be recovered. Continue?'
+    );
+    if (ok) showAuthSub('setup');
+  });
   $id('link-import').addEventListener('click', () => showAuthSub('import'));
-  $id('back-to-unlock-from-setup').addEventListener('click', () => showAuthSub('unlock'));
-  $id('back-to-unlock-from-import').addEventListener('click', () => showAuthSub('unlock'));
+  $id('back-to-unlock-from-setup').addEventListener('click', () => {
+    const hasIdentity = !!localStorage.getItem('blind-edge:identity');
+    showAuthSub(hasIdentity ? 'unlock' : 'welcome');
+  });
+  $id('back-to-unlock-from-import').addEventListener('click', () => {
+    const hasIdentity = !!localStorage.getItem('blind-edge:identity');
+    showAuthSub(hasIdentity ? 'unlock' : 'welcome');
+  });
   $id('btn-create').addEventListener('click', doCreate);
   $id('btn-import').addEventListener('click', doImport);
 
@@ -1254,17 +1542,7 @@ function wireEvents() {
   $id('btn-back').addEventListener('click', goBack);
   $id('btn-identity').addEventListener('click', openIdentityModal);
   $id('btn-settings').addEventListener('click', openSettingsModal);
-  $id('btn-add-contact').addEventListener('click', () => {
-    // Reset to By Key tab
-    $id('section-by-key').classList.remove('hidden');
-    $id('section-by-code').classList.add('hidden');
-    $id('tab-by-key').classList.add('active');
-    $id('tab-by-code').classList.remove('active');
-    clearErr('contact-error');
-    clearErr('lookup-error');
-    $id('my-code-section').classList.add('hidden');
-    openModal('modal-add-contact');
-  });
+  $id('btn-add-contact').addEventListener('click', openAddContactModal);
 
   // Compose
   const composeInput = $id('compose-input');
@@ -1293,9 +1571,8 @@ function wireEvents() {
   $id('btn-cancel-contact').addEventListener('click', () => closeModal('modal-add-contact'));
   $id('btn-save-contact').addEventListener('click', addContact);
 
-  // Add contact modal — By Code tab
-  $id('btn-generate-code').addEventListener('click', generateDiscoveryCode);
-  $id('btn-register-code').addEventListener('click', registerDiscoveryCode);
+  // Add contact modal — Share code tab
+  $id('btn-get-code').addEventListener('click', getShareCode);
   $id('btn-lookup-code').addEventListener('click', lookupDiscoveryCode);
   $id('btn-cancel-contact-code').addEventListener('click', () => closeModal('modal-add-contact'));
 
@@ -1312,17 +1589,19 @@ function wireEvents() {
   $id('btn-confirm-export').addEventListener('click', doExportIdentityJSON);
   $id('btn-cancel-export').addEventListener('click', () => closeModal('modal-export-warning'));
 
-  // Seed phrase modal
-  $id('seed-confirm-check').addEventListener('change', async e => {
+  // Seed phrase modal — two deliberate steps: the checkbox only ARMS the
+  // reveal button; nothing is shown until the button is explicitly clicked.
+  // Unchecking re-hides the words immediately.
+  $id('seed-confirm-check').addEventListener('change', e => {
     $id('btn-confirm-seed').disabled = !e.target.checked;
-    if (e.target.checked) await doRevealSeedPhrase();
-    else {
+    if (!e.target.checked) {
       $id('seed-phrase-words').classList.add('hidden');
       $id('seed-passphrase-note').classList.add('hidden');
     }
   });
   $id('btn-confirm-seed').addEventListener('click', async () => {
-    if ($id('seed-phrase-words').classList.contains('hidden')) await doRevealSeedPhrase();
+    if (!$id('seed-confirm-check').checked) return;
+    await doRevealSeedPhrase();
   });
   $id('btn-close-seed').addEventListener('click', () => closeModal('modal-seed-phrase'));
 
@@ -1354,9 +1633,28 @@ function wireEvents() {
   $id('btn-close-settings').addEventListener('click', () => closeModal('modal-settings'));
   $id('btn-download-db').addEventListener('click', downloadDB);
   $id('btn-logout').addEventListener('click', lockSession);
+  $id('btn-delete-identity').addEventListener('click', deleteIdentityFromDevice);
+
+  // Install
+  $id('btn-install-app').addEventListener('click', async () => {
+    if (!_deferredInstallPrompt) return;
+    _deferredInstallPrompt.prompt();
+    await _deferredInstallPrompt.userChoice.catch(() => {});
+    _deferredInstallPrompt = null;
+    $id('btn-install-app').classList.add('hidden');
+  });
+  $id('btn-ios-install').addEventListener('click', () => {
+    closeModal('modal-settings');
+    openModal('modal-ios-install');
+  });
+  $id('btn-close-ios-install').addEventListener('click', () => closeModal('modal-ios-install'));
 
   // About modal
-  $id('link-about').addEventListener('click', () => openModal('modal-about'));
+  $id('link-about').addEventListener('click', openAboutModal);
+  $id('btn-about-from-settings').addEventListener('click', () => {
+    closeModal('modal-settings');
+    openAboutModal();
+  });
   $id('btn-close-about').addEventListener('click', () => closeModal('modal-about'));
 
   // Close modals on backdrop click
@@ -1367,8 +1665,19 @@ function wireEvents() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+// Capture the install prompt early (fires before DOMContentLoaded sometimes).
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   wireEvents();
   const hasIdentity = !!localStorage.getItem('blind-edge:identity');
-  showAuthSub(hasIdentity ? 'unlock' : 'setup');
+  showAuthSub(hasIdentity ? 'unlock' : 'welcome');
+
+  // QR deep links: a scanned code opens /#add=<key> — consume it now (stashed
+  // until unlock) and react if one arrives while the app is already open.
+  consumeDeepLink();
+  window.addEventListener('hashchange', consumeDeepLink);
 });

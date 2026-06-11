@@ -1,3 +1,15 @@
+// StorageManager — everything B.E.Chat persists on this device, in one place.
+//
+// A sql.js (SQLite-in-WASM) database is serialized into a single IndexedDB
+// blob, keyed per identity (the SHA-256 hash of your ECDH public key), so two
+// identities on one browser never see each other's data.
+//
+// Honest note on what's protected: messages, contact names, and group keys
+// are stored READABLE inside this database. The App Password encrypts your
+// private keys (see crypto.js) — it does not encrypt message history.
+// Anyone with full access to this browser profile can read the history.
+// That trade-off buys instant search/rendering with zero key-management
+// complexity for data that already lives on a device you control.
 import { hexToBytes, bytesToHex } from './hex.js';
 
 function idbOpen() {
@@ -417,6 +429,20 @@ export class StorageManager {
     await this._persist();
   }
 
+  // Live inventory for the "On this device" panel.
+  async getStats() {
+    const one = sql => {
+      const r = this._db.exec(sql);
+      return r.length ? r[0].values[0][0] : 0;
+    };
+    return {
+      contacts: one('SELECT COUNT(*) FROM contacts'),
+      messages: one('SELECT COUNT(*) FROM messages') + one('SELECT COUNT(*) FROM group_messages'),
+      groups: one('SELECT COUNT(*) FROM groups'),
+      dbBytes: this._db.export().length,
+    };
+  }
+
   async _persist() {
     await idbPut(this._idb, this._storageKey, this._db.export());
   }
@@ -425,5 +451,17 @@ export class StorageManager {
     await this._persist();
     this._db.close();
     this._idb.close();
+  }
+
+  // Permanently remove one identity's database blob from IndexedDB.
+  // Static so it can run without an unlocked StorageManager instance.
+  static async deleteIdentityData(storageKey) {
+    const idb = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const req = idb.transaction('blobs', 'readwrite').objectStore('blobs').delete(storageKey);
+      req.onsuccess = () => resolve();
+      req.onerror = e => reject(e.target.error);
+    });
+    idb.close();
   }
 }

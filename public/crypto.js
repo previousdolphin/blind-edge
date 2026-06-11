@@ -1,3 +1,22 @@
+// SecurityManager — every cryptographic operation in B.E.Chat lives here.
+// Native Web Crypto only; no libraries.
+//
+// Key hierarchy:
+//
+//   App Password ──PBKDF2-SHA256 (600k, random salt)──▶ masterKey (AES-256-GCM)
+//        masterKey wraps the vault: { ecdhPriv, signPriv, entropy }
+//
+//   BIP39 entropy (16 bytes) ──mnemonic──▶ 12 words
+//        seed = PBKDF2-SHA512(words, passphrase)  (bip39.js)
+//        seed ──HKDF-SHA256──▶ two deterministic P-256 scalars
+//             info "blind-edge-ecdh-v2"  → long-term ECDH keypair (encryption)
+//             info "blind-edge-ecdsa-v2" → long-term ECDSA keypair (signing)
+//        Same words ⇒ same keys ⇒ same relay address, on any device.
+//
+// Per-message: ephemeral ECDH → HKDF (info binds BOTH public keys, sorted —
+// see _deriveSharedAesKey for why) → AES-256-GCM, padded to 256-byte blocks.
+// Forward secrecy is sender-side only: the ephemeral private key is discarded
+// after encryption, but the recipient's long-term key still decrypts.
 import { hexToBytes, bytesToHex } from './hex.js';
 
 // PKCS8 DER prefix for a P-256 private key (RFC 5958 / SEC 1).
@@ -417,15 +436,16 @@ export class SecurityManager {
   }
 
   // Identity bundle v2: holds both the ECDH (encryption) and ECDSA (signing)
-  // long-term keypairs. The two private keys are wrapped together under the
-  // password-derived master key.
-  static async exportIdentityBundle(ecdhKeypair, signKeypair, masterKey, salt) {
+  // long-term keypairs. The two private keys — and, for seed-derived
+  // identities, the BIP39 entropy behind the recovery phrase — are wrapped
+  // together under the password-derived master key, so the 12 words are only
+  // readable after unlock.
+  static async exportIdentityBundle(ecdhKeypair, signKeypair, masterKey, salt, entropyHex = null) {
     const ecdhJwk = await crypto.subtle.exportKey('jwk', ecdhKeypair.privateKey);
     const signJwk = await crypto.subtle.exportKey('jwk', signKeypair.privateKey);
-    const encryptedPrivateKeys = await SecurityManager.encryptVault(
-      { ecdhPriv: ecdhJwk, signPriv: signJwk },
-      masterKey
-    );
+    const vault = { ecdhPriv: ecdhJwk, signPriv: signJwk };
+    if (entropyHex) vault.entropy = entropyHex;
+    const encryptedPrivateKeys = await SecurityManager.encryptVault(vault, masterKey);
     const ecdhPubHex = await SecurityManager.exportPublicKeyHex(ecdhKeypair.publicKey);
     const signPubHex = await SecurityManager.exportSignPublicKeyHex(signKeypair.publicKey);
 
@@ -461,6 +481,8 @@ export class SecurityManager {
         sign,
         salt: hexToBytes(parsed.salt),
         migratedFromV1: true,
+        entropyHex: null,
+        entropyWasPlaintext: false,
       };
     }
 
@@ -468,7 +490,7 @@ export class SecurityManager {
       throw new Error(`Unsupported bundle version: ${parsed.version}`);
     }
 
-    const { ecdhPriv, signPriv } = await SecurityManager.decryptVault(
+    const { ecdhPriv, signPriv, entropy } = await SecurityManager.decryptVault(
       parsed.encryptedPrivateKeys.ciphertext,
       parsed.encryptedPrivateKeys.iv,
       masterKey
@@ -482,11 +504,18 @@ export class SecurityManager {
     const ecdhPublicKey = await SecurityManager.importPublicKeyHex(parsed.ecdhPubHex);
     const signPublicKey = await SecurityManager.importSignPublicKeyHex(parsed.signPubHex);
 
+    // Bundles written before v1.5 stored seed entropy as a plaintext
+    // top-level field. Honor it, and report it so the caller can rewrap it
+    // inside the encrypted vault on this unlock.
+    const legacyEntropy = (!entropy && typeof parsed.entropy === 'string') ? parsed.entropy : null;
+
     return {
       ecdh: { publicKey: ecdhPublicKey, privateKey: ecdhPrivateKey },
       sign: { publicKey: signPublicKey, privateKey: signPrivateKey },
       salt: hexToBytes(parsed.salt),
       migratedFromV1: false,
+      entropyHex: entropy || legacyEntropy || null,
+      entropyWasPlaintext: !!legacyEntropy,
     };
   }
 }

@@ -6,10 +6,13 @@
   <meta name="theme-color" content="#0a0a0a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="B.E.Chat">
   <meta name="description" content="Local-first, end-to-end encrypted messaging">
   <title>B.E.Chat — Blind-Edge Messenger</title>
 
   <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1085,12 +1088,6 @@
       padding: 10px 0 4px;
     }
 
-    #discovery-expiry {
-      font-size: 12px;
-      color: #4ade80;
-      text-align: center;
-      margin-bottom: 4px;
-    }
 
     /* ------------------------------------------------------------------ */
     /* Group chat + members modal                                          */
@@ -1103,6 +1100,17 @@
       padding: 1px 6px;
       margin-left: 4px;
       vertical-align: middle;
+    }
+
+    .legacy-badge {
+      font-size: 10px;
+      color: #b8860b;
+      border: 1px solid rgba(184, 134, 11, 0.45);
+      border-radius: 99px;
+      padding: 1px 6px;
+      margin-left: 4px;
+      vertical-align: middle;
+      white-space: nowrap;
     }
 
     .group-sender {
@@ -1304,6 +1312,251 @@
       max-width: 280px;
       height: auto;
     }
+
+    /* ------------------------------------------------------------------ */
+    /* Welcome / onboarding                                                */
+    /* ------------------------------------------------------------------ */
+    .welcome-tagline {
+      font-size: 15px;
+      color: #aaa;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .welcome-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .welcome-card {
+      border: 1px solid #1e1e1e;
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: #0f0f0f;
+    }
+
+    .welcome-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e8e8e8;
+      margin-bottom: 3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .welcome-card-title .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      flex-shrink: 0;
+    }
+
+    .welcome-card-desc {
+      font-size: 12px;
+      color: #777;
+      line-height: 1.55;
+    }
+
+    .onboard-confirm {
+      font-size: 12px;
+      color: #4ade80;
+      background: rgba(74, 222, 128, 0.06);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+      border-radius: 6px;
+      padding: 10px 12px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .onboard-stakes {
+      font-size: 12px;
+      color: #999;
+      line-height: 1.6;
+      margin: 12px 0 16px;
+    }
+
+    .onboard-stakes strong { color: #e8e8e8; }
+
+    .burner-panel {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.6;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-top: 12px;
+    }
+
+    .burner-panel strong { color: #ccc; }
+
+    .auth-card .ready-address {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #4ade80;
+      word-break: break-all;
+      text-align: center;
+      line-height: 1.6;
+      margin: 8px 0 4px;
+    }
+
+    .ready-caption {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* QR display                                                          */
+    /* ------------------------------------------------------------------ */
+    .qr-box {
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px;
+      margin: 10px auto;
+      width: fit-content;
+      line-height: 0;
+    }
+
+    .qr-box svg {
+      width: 200px;
+      height: 200px;
+      display: block;
+    }
+
+    .qr-caption {
+      font-size: 12px;
+      color: #777;
+      text-align: center;
+      line-height: 1.55;
+      margin-bottom: 8px;
+    }
+
+    /* Expandable "why" details */
+    details.why {
+      margin: 8px 0 12px;
+    }
+
+    details.why summary {
+      font-size: 11px;
+      color: #555;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      user-select: none;
+    }
+
+    details.why summary:hover { color: #888; }
+
+    details.why p {
+      font-size: 12px;
+      color: #777;
+      line-height: 1.6;
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: #111;
+      border-radius: 6px;
+      border: 1px solid #1e1e1e;
+    }
+
+    details.why strong { color: #aaa; }
+
+    /* ------------------------------------------------------------------ */
+    /* Relay status indicator                                              */
+    /* ------------------------------------------------------------------ */
+    #relay-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: #555;
+      text-transform: none;
+      letter-spacing: 0.02em;
+    }
+
+    #relay-status .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #444;
+      flex-shrink: 0;
+    }
+
+    #relay-status.ok .dot { background: #4ade80; }
+    #relay-status.offline .dot { background: #ef4444; }
+    #relay-status.ok { color: #4ade8088; }
+    #relay-status.offline { color: #ef4444aa; }
+
+    /* ------------------------------------------------------------------ */
+    /* Device inventory panel (Settings)                                   */
+    /* ------------------------------------------------------------------ */
+    .device-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+      color: #888;
+      padding: 7px 0;
+      border-bottom: 1px solid #1a1a1a;
+      line-height: 1.5;
+    }
+
+    .device-row:last-of-type { border-bottom: none; }
+    .device-row .device-val {
+      color: #4ade80;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .device-note {
+      font-size: 11px;
+      color: #555;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
+
+    /* Discovery code countdown */
+    #code-countdown {
+      font-size: 12px;
+      color: #4ade80;
+      text-align: center;
+      margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Envelope inspector */
+    .envelope-dump {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #4ade80;
+      background: #0a0a0a;
+      border: 1px solid #1e1e1e;
+      border-radius: 6px;
+      padding: 10px;
+      word-break: break-all;
+      line-height: 1.6;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    /* iOS install steps */
+    .install-steps {
+      font-size: 13px;
+      color: #999;
+      line-height: 1.8;
+      padding-left: 18px;
+      margin-bottom: 8px;
+    }
+
+    .install-steps strong { color: #e8e8e8; }
   </style>
 </head>
 <body>
@@ -1313,6 +1566,39 @@
     <!-- AUTH VIEW                                                          -->
     <!-- ================================================================ -->
     <div id="view-auth" class="view view-auth active">
+
+      <!-- Welcome sub-state (first run) -->
+      <div id="auth-welcome" class="hidden">
+        <div class="auth-card">
+          <div class="auth-logo">
+            <img src="logo.svg" alt="B.E.Chat" draggable="false">
+          </div>
+
+          <div class="welcome-tagline">Private messaging where everything lives on your device.</div>
+
+          <div class="welcome-cards">
+            <div class="welcome-card">
+              <div class="welcome-card-title"><span class="dot"></span>Your keys are made here</div>
+              <div class="welcome-card-desc">Generated in this browser, and they never leave it. No account, no sign-up, no server that knows who you are.</div>
+            </div>
+            <div class="welcome-card">
+              <div class="welcome-card-title"><span class="dot"></span>Messages stay on your devices</div>
+              <div class="welcome-card-desc">Your history is stored only on your phone or computer. There is no server copy to leak, subpoena, or hack.</div>
+            </div>
+            <div class="welcome-card">
+              <div class="welcome-card-title"><span class="dot"></span>The relay only passes sealed envelopes</div>
+              <div class="welcome-card-desc">It sees encrypted bytes and anonymous key fingerprints — never names, never content. Anyone can run their own.</div>
+            </div>
+          </div>
+
+          <button id="btn-welcome-create" class="btn-primary">Create my identity</button>
+          <div class="auth-links">
+            Already have one?
+            <a id="link-welcome-import">Restore it</a>
+          </div>
+          <a class="about-link" id="link-about-welcome">How does this actually work? &rarr;</a>
+        </div>
+      </div>
 
       <!-- Unlock sub-state -->
       <div id="auth-unlock">
@@ -1336,14 +1622,16 @@
             autocomplete="current-password"
           >
           <button id="btn-unlock" class="btn-primary">Unlock</button>
+          <div class="auth-section-desc" style="margin-top:10px;margin-bottom:0">
+            Unlocks the keys stored on this device. Nothing is sent or checked online.
+          </div>
 
           <div id="unlock-error" class="error hidden"></div>
 
           <div class="auth-links">
-            New device?
-            <a id="link-import">Import identity</a>
+            <a id="link-import">Restore a backup</a>
             &nbsp;&mdash;&nbsp;
-            <a id="link-setup">Create new</a>
+            <a id="link-setup">Start a fresh identity</a>
           </div>
           <a class="about-link" id="link-about">How it works &rarr;</a>
         </div>
@@ -1352,17 +1640,17 @@
       <!-- Setup sub-state -->
       <div id="auth-setup" class="hidden">
         <div class="auth-card">
-          <div class="auth-section-title">Create Identity</div>
+          <div class="auth-section-title">Set a local password</div>
           <div class="auth-section-desc">
-            A keypair is generated locally and encrypted with your password.
-            Nothing is sent to a server. You can export your identity later
-            to restore access on another device.
+            This password locks your keys on this device only. It is never sent
+            anywhere — there is no account and no password reset. If you forget
+            it, the 12 recovery words on the next screen are the only way back in.
           </div>
 
           <input
             type="password"
             id="setup-password"
-            placeholder="App Password"
+            placeholder="App Password (min 8 characters)"
             autocomplete="new-password"
           >
           <input
@@ -1371,11 +1659,67 @@
             placeholder="Confirm Password"
             autocomplete="new-password"
           >
-          <button id="btn-create" class="btn-primary">Generate Identity</button>
+          <button id="btn-create" class="btn-primary">Generate my keys</button>
 
           <div id="setup-error" class="error hidden"></div>
 
-          <a id="back-to-unlock-from-setup" class="auth-back">← Back to unlock</a>
+          <a id="back-to-unlock-from-setup" class="auth-back">← Back</a>
+        </div>
+      </div>
+
+      <!-- Seed backup sub-state (shown once, right after key generation) -->
+      <div id="auth-seed-backup" class="hidden">
+        <div class="auth-card">
+          <div class="onboard-confirm">✓ Two keys were just created in your browser. Nothing was sent to any server.</div>
+
+          <div class="auth-section-title">Your 12 recovery words</div>
+
+          <div id="onboard-seed-grid" class="seed-grid"></div>
+
+          <div class="onboard-stakes">
+            These words <strong>are</strong> your identity. Anyone who has them can be you.
+            If you lose them and this device, the identity is gone — nobody can reset it,
+            because nobody else has it. Message history never leaves your devices either way,
+            so it can't be recovered from the relay. Write the words on paper, not in a screenshot.
+          </div>
+
+          <label class="warning-confirm-row" for="onboard-seed-check" style="margin-bottom:12px">
+            <input type="checkbox" id="onboard-seed-check">
+            <span>I wrote them down. <strong>I understand there is no other way back in.</strong></span>
+          </label>
+
+          <button id="btn-onboard-continue" class="btn-primary" disabled>Continue</button>
+
+          <div class="or-divider" style="margin-top:14px">or</div>
+
+          <button id="btn-onboard-skip" class="btn-secondary" style="width:100%">Skip — I'm using this as a disposable session</button>
+
+          <div id="burner-panel" class="burner-panel hidden">
+            Totally fine — that's a feature, not a failure. Treat this identity like a
+            <strong>burner</strong>: use it, then delete it (Menu → Delete identity), or just clear
+            this site's data. Next visit, create a fresh one in seconds — new address, clean slate.
+            Contacts from this session won't be able to reach the new you.
+            <button id="btn-onboard-skip-confirm" class="btn-primary" style="margin-top:12px">Continue without backup</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ready sub-state (end of onboarding) -->
+      <div id="auth-ready" class="hidden">
+        <div class="auth-card">
+          <div class="auth-section-title" style="text-align:center">You're ready</div>
+
+          <div id="ready-identicon" style="display:flex;justify-content:center;margin:14px 0 4px"></div>
+          <div id="ready-address" class="ready-address"></div>
+          <div class="ready-caption">
+            This is your address — a fingerprint of your public key.
+            A number, not a name. There's no phone number or email anywhere in this system.
+          </div>
+
+          <div id="ready-qr" class="qr-box"></div>
+          <div class="qr-caption">Someone points their camera at this and they can message you. That's the whole sign-up.</div>
+
+          <button id="btn-onboard-finish" class="btn-primary">Open the app</button>
         </div>
       </div>
 
@@ -1470,17 +1814,19 @@
         <button id="btn-back" class="hidden">← Back</button>
         <span id="app-title">B.E.Chat</span>
         <div class="header-actions">
-          <button id="btn-ttl" class="hidden" title="Message autodestruct">Timer</button>
+          <button id="btn-ttl" class="hidden" title="Auto-delete messages on this device">Auto-delete</button>
           <button id="btn-group-members" class="hidden" title="Group members">Members</button>
-          <button id="btn-identity" title="Your Identity">Key</button>
-          <button id="btn-settings" title="Settings">Set</button>
+          <button id="btn-identity" title="Your address, QR code, and backups">ID</button>
+          <button id="btn-settings" title="Settings">Menu</button>
         </div>
       </header>
 
       <!-- Contact List Panel -->
       <div id="panel-contacts" class="panel active">
         <div class="panel-header">
-          <span>Conversations</span>
+          <span style="display:flex;align-items:center;gap:10px">Conversations
+            <span id="relay-status" title="Connection to the message relay"><span class="dot"></span><span id="relay-status-text"></span></span>
+          </span>
           <div style="display:flex;gap:6px">
             <button id="btn-create-group">+ Group</button>
             <button id="btn-add-contact">+ Add</button>
@@ -1488,8 +1834,8 @@
         </div>
         <div id="contact-list"></div>
         <div id="contact-empty" class="empty-state hidden">
-          <p>No contacts yet.</p>
-          <p>Add a contact by sharing public keys out of band.</p>
+          <p>No conversations yet.</p>
+          <p>Tap <strong>+ Add</strong> — show someone your QR code, or trade a 6-letter share code.</p>
         </div>
       </div>
 
@@ -1520,25 +1866,40 @@
         <div class="modal-title" id="modal-add-contact-title">Add Contact</div>
 
         <div class="tab-row">
-          <button id="tab-by-key" class="tab-btn active">By Key</button>
-          <button id="tab-by-code" class="tab-btn">By Code</button>
+          <button id="tab-by-key" class="tab-btn active">QR / key</button>
+          <button id="tab-by-code" class="tab-btn">Share code</button>
         </div>
 
-        <!-- By Key section -->
+        <!-- QR / Key section -->
         <div id="section-by-key">
+          <div class="label">Have them scan you</div>
+          <div id="add-contact-qr" class="qr-box"></div>
+          <div class="qr-caption">They point their camera app at this — it opens B.E.Chat with your key filled in.</div>
+          <details class="why">
+            <summary>Why scanning in person is the gold standard</summary>
+            <p>A QR scanned face-to-face hands over your <strong>public key</strong> with no
+            middleman who could swap it for theirs. Keys here are trusted on first use, so the
+            moment of exchange is what matters. (Public keys are safe to show anyone — they
+            can't be used to read anything.)</p>
+          </details>
+
+          <div class="or-divider">or add them</div>
+
+          <div class="code-hint">Scan <em>their</em> QR with your camera app, or paste their key below.</div>
+
           <div class="label">Name</div>
           <input
             type="text"
             id="contact-name-input"
-            placeholder="Contact name"
+            placeholder="What you call them"
             autocomplete="off"
             autocapitalize="words"
           >
 
-          <div class="label">Public Key</div>
+          <div class="label">Their key</div>
           <textarea
             id="contact-key-input"
-            placeholder="Their public key (hex)"
+            placeholder="Paste their key string"
             rows="3"
             autocomplete="off"
             autocorrect="off"
@@ -1550,38 +1911,42 @@
 
           <div class="modal-actions">
             <button id="btn-cancel-contact" class="btn-secondary">Cancel</button>
-            <button id="btn-save-contact" class="btn-primary">Add Contact</button>
+            <button id="btn-save-contact" class="btn-primary">Add contact</button>
           </div>
         </div>
 
-        <!-- By Code section -->
+        <!-- Share code section -->
         <div id="section-by-code" class="hidden">
 
           <div class="code-subsection">
-            <div class="label">Your Code — Share With Contact</div>
-            <div class="code-hint">Generate a 10-minute code. Share it verbally — your contact enters it to add you automatically.</div>
+            <div class="label">Not in the same room?</div>
+            <div class="code-hint">Get a 6-letter code and tell them — out loud, over a call, however. They type it in and you're connected.</div>
             <div id="my-code-section" class="hidden">
               <div id="my-code-display"></div>
-              <div id="discovery-expiry" class="hidden"></div>
+              <div id="code-countdown" class="hidden"></div>
             </div>
-            <div class="code-btn-row">
-              <button id="btn-generate-code" class="btn-secondary" style="flex:1">Generate</button>
-              <button id="btn-register-code" class="btn-primary" style="flex:1" disabled>Register</button>
-            </div>
+            <button id="btn-get-code" class="btn-primary" style="width:100%">Get a share code</button>
+            <details class="why">
+              <summary>What the relay sees (and why 10 minutes)</summary>
+              <p>The relay never sees the code itself — only its <strong>SHA-256 hash</strong>,
+              mapped to your public key for 10 minutes. Anyone who learns the code in that window
+              could add themselves as you, so say it directly to the person rather than posting it
+              somewhere public. After 10 minutes it's useless.</p>
+            </details>
           </div>
 
-          <div class="or-divider">or enter their code</div>
+          <div class="or-divider">or enter theirs</div>
 
           <div class="label">Name</div>
           <input
             type="text"
             id="lookup-contact-name"
-            placeholder="Contact name"
+            placeholder="What you call them"
             autocomplete="off"
             autocapitalize="words"
           >
 
-          <div class="label">Their Code</div>
+          <div class="label">Their code</div>
           <input
             type="text"
             id="lookup-code-input"
@@ -1597,7 +1962,7 @@
 
           <div class="modal-actions">
             <button id="btn-cancel-contact-code" class="btn-secondary">Cancel</button>
-            <button id="btn-lookup-code" class="btn-primary">Look Up</button>
+            <button id="btn-lookup-code" class="btn-primary">Add by code</button>
           </div>
         </div>
 
@@ -1613,16 +1978,31 @@
 
         <div id="identity-identicon" style="display:flex;justify-content:center;margin:4px 0 12px"></div>
 
-        <div class="label">Public Key</div>
-        <div id="identity-pubkey" class="mono-box"></div>
+        <div class="label">Your QR</div>
+        <div id="identity-qr" class="qr-box"></div>
+        <div class="qr-caption">Friends scan this with their camera to add you.</div>
 
-        <div class="label">Key Hash (your address)</div>
+        <div class="label">Your address</div>
         <div id="identity-hash" class="mono-box short"></div>
+        <div class="device-note" style="margin-top:2px">A SHA-256 fingerprint of your public key — this number is all the relay ever knows about you.</div>
+
+        <details class="why">
+          <summary>Show the full key string</summary>
+          <p style="padding:0;background:none;border:none;margin-top:8px">
+            <span id="identity-pubkey" class="mono-box" style="display:block"></span>
+            Two P-256 public keys (encryption : signing). Safe to share with anyone — this is what the QR encodes.
+          </p>
+        </details>
+
+        <div id="identity-no-seed-note" class="device-note hidden" style="margin-top:10px">
+          This identity predates recovery phrases, so it has no 12 words — your backup is the
+          JSON export below. To get a recovery phrase, create a new identity (it will have a new address).
+        </div>
 
         <div class="modal-actions">
-          <button id="btn-copy-pubkey" class="btn-primary">Copy Key</button>
-          <button id="btn-export-identity" class="btn-primary">Export JSON</button>
-          <button id="btn-show-seed" class="btn-secondary hidden">Seed Phrase</button>
+          <button id="btn-copy-pubkey" class="btn-primary">Copy key</button>
+          <button id="btn-show-seed" class="btn-secondary hidden">Recovery words</button>
+          <button id="btn-export-identity" class="btn-secondary">Export backup file</button>
           <button id="btn-close-identity" class="btn-secondary">Close</button>
         </div>
       </div>
@@ -1635,7 +2015,28 @@
       <div class="modal-box">
         <div class="modal-title" id="modal-settings-title">Settings</div>
 
-        <div class="label">Worker URL</div>
+        <div class="label">On this device</div>
+        <div id="device-inventory">
+          <div class="device-row"><span>Identity keys (encrypted with your App Password)</span><span class="device-val" id="stat-identity"></span></div>
+          <div class="device-row"><span id="stat-messages-label">Messages &amp; contacts</span><span class="device-val" id="stat-db"></span></div>
+          <div class="device-row"><span>Total site storage</span><span class="device-val" id="stat-total"></span></div>
+        </div>
+        <div class="device-note">
+          Messages are stored <strong>readable</strong> in this browser's database — the password
+          locks your keys, not your history. Anyone with full access to this browser profile can
+          read it. The relay holds only sealed envelopes, for at most 24 hours.
+        </div>
+
+        <hr>
+
+        <div id="install-section" class="hidden">
+          <div class="label">Install</div>
+          <button id="btn-install-app" class="btn-secondary hidden" style="width:100%">Install as an app</button>
+          <button id="btn-ios-install" class="btn-secondary hidden" style="width:100%">Add to Home Screen (how)</button>
+          <div class="device-note" style="margin-bottom:16px">Installed, B.E.Chat works offline and your data is less likely to be evicted by the browser.</div>
+        </div>
+
+        <div class="label">Relay URL</div>
         <input
           type="url"
           id="setting-server-url"
@@ -1645,8 +2046,9 @@
           autocapitalize="off"
           spellcheck="false"
         >
+        <div class="device-note" style="margin-top:-6px;margin-bottom:10px">The demo relay works out of the box. Run your own with one command — see the GitHub README.</div>
 
-        <div class="label">Sync Interval (seconds)</div>
+        <div class="label">Sync interval (seconds)</div>
         <input
           type="number"
           id="setting-sync-interval"
@@ -1662,10 +2064,13 @@
 
         <hr>
 
+        <button id="btn-about-from-settings" class="btn-secondary" style="width:100%;margin-bottom:16px">How it works — storage, relay, limitations</button>
+
         <div class="danger-zone">
           <div class="label">Danger Zone</div>
-          <button id="btn-download-db" class="btn-secondary">Download DB</button>
-          <button id="btn-logout" class="btn-danger">Lock &amp; Clear Session</button>
+          <button id="btn-download-db" class="btn-secondary">Download message database</button>
+          <button id="btn-logout" class="btn-secondary">Lock</button>
+          <button id="btn-delete-identity" class="btn-danger">Delete this identity from this device</button>
         </div>
       </div>
     </div>
@@ -1679,56 +2084,109 @@
         <img src="logo.svg" alt="B.E.Chat" class="about-logo">
 
         <div class="about-section">
-          <div class="about-heading">The Blind Server</div>
-          <p>The relay stores and forwards your messages as raw ciphertext. It cannot read them, has no user accounts, and never sees your name, password, or contacts. Your "address" is the SHA-256 hash of your public key — a number, not an identity. The relay enforces a 24-hour server-side TTL and rate-limits writes per IP to resist flooding.</p>
+          <div class="about-heading">What's on your device</div>
+          <p>Exactly two things. ① Your <strong>identity vault</strong>: both private keys and your
+          recovery words, sealed with AES-256-GCM under a key derived from your App Password
+          (<strong>PBKDF2, 600,000 rounds</strong>) and kept in this browser's localStorage.
+          ② Your <strong>message database</strong>: conversations, contacts, and groups, stored
+          <strong>readable</strong> in this browser's IndexedDB — the password protects your keys,
+          not your history. That's the complete list. Nothing about you exists anywhere else.</p>
         </div>
 
         <div class="about-section">
-          <div class="about-heading">What the server sees</div>
+          <div class="about-heading">What the relay sees</div>
+          <p>The relay is a dumb, blind mailbox. It stores sealed envelopes for at most 24 hours,
+          has no user accounts, and rate-limits per IP. Anyone can run one — it's ~200 lines of
+          open-source code.</p>
           <table class="about-table">
-            <tr><th>Field</th><th>Server receives</th><th>Meaning</th></tr>
-            <tr><td>Message</td><td>Padded hex ciphertext</td><td class="nothing">nothing</td></tr>
-            <tr><td>Sender</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
-            <tr><td>Recipient</td><td>Key hash (SHA-256)</td><td class="nothing">nothing</td></tr>
+            <tr><th>Field</th><th>Relay receives</th><th>What it learns</th></tr>
+            <tr><td>Message</td><td>Padded ciphertext</td><td class="nothing">nothing</td></tr>
+            <tr><td>Sender</td><td>Key hash (SHA-256)</td><td class="nothing">a number, not a name</td></tr>
+            <tr><td>Recipient</td><td>Key hash (SHA-256)</td><td class="nothing">a number, not a name</td></tr>
+            <tr><td>Timing &amp; size</td><td>Timestamps; length padded to 256-byte blocks</td><td>approximate traffic patterns</td></tr>
             <tr><td>Password</td><td>Never sent</td><td class="nothing">nothing</td></tr>
-            <tr><td>Private key</td><td>Never sent</td><td class="nothing">nothing</td></tr>
+            <tr><td>Private keys</td><td>Never sent</td><td class="nothing">nothing</td></tr>
+            <tr><td>Contacts</td><td>Never sent</td><td class="nothing">nothing</td></tr>
           </table>
+          <details class="why" id="envelope-inspector-details">
+            <summary>Show me the actual bytes — the last thing this app sent</summary>
+            <div id="envelope-dump" class="envelope-dump" style="margin-top:8px">Nothing sent yet this session. Send a message, then look again.</div>
+          </details>
         </div>
 
         <div class="about-section">
-          <div class="about-heading">End-to-End Encryption</div>
-          <p>Messages are encrypted using <strong>ECDH P-256 + HKDF + AES-256-GCM</strong> before they leave your browser — using only the native Web Crypto API, no libraries. All payloads are <strong>padded to 256-byte blocks</strong> before encryption so ciphertext length reveals nothing about message length. Only the intended recipient's private key can decrypt them.</p>
+          <div class="about-heading">If you lose your keys</div>
+          <p>Your <strong>12 recovery words</strong> recreate your exact keys on any device — same
+          address, so contacts can still reach you (<strong>ID → Recovery words</strong> to view them
+          again). Message history does <em>not</em> come back: it only ever existed on your devices,
+          which is the point — there is no server copy of it for anyone to recover, including you.
+          No words and no backup file means the identity is gone permanently. Nobody can reset it,
+          because nobody else has it.</p>
         </div>
 
         <div class="about-section">
-          <div class="about-heading">Your Identity</div>
-          <p>A cryptographic keypair generated in your browser. Your private key is encrypted with your App Password via <strong>PBKDF2 (600,000 rounds)</strong> and stored locally — it never leaves your device. Your <strong>identicon</strong> (the pixel pattern next to your key) is a visual fingerprint derived from your public key, making out-of-band verification faster than comparing raw hex strings. Export only when moving to a new device, then delete the file immediately.</p>
-          <p>If you created your identity from a <strong>seed phrase</strong> (12 BIP39 words + optional passphrase), you can view and back up those words any time via <strong>Key → Show Seed Phrase</strong>. Identities generated without a seed phrase cannot show one — the option only appears when derivation was seed-based.</p>
+          <div class="about-heading">Burner mode</div>
+          <p>Don't want permanence? Skip the backup. Use an identity for a session, then
+          <strong>Menu → Delete this identity</strong>. Fresh keys take five seconds and cost
+          nothing — new address, clean slate. Contacts from the old session can't reach the new
+          you. Disposable identities are a feature here, not an accident.</p>
         </div>
 
         <div class="about-section">
-          <div class="about-heading">Getting Started</div>
+          <div class="about-heading">How the encryption works</div>
+          <p>Each message gets a fresh <strong>ephemeral ECDH P-256</strong> key, run through
+          <strong>HKDF</strong> into a one-time <strong>AES-256-GCM</strong> key, and is signed with
+          your long-term ECDSA key — all with the browser's native Web Crypto API, zero libraries.
+          Payloads are padded to 256-byte blocks so length reveals nothing. Replay attacks are
+          rejected with a counter sealed inside the ciphertext.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Groups</div>
+          <p>Groups use a shared AES-256-GCM key distributed over the existing encrypted 1:1
+          channels. The relay sees the group as one anonymous address — it doesn't even know it's
+          serving a group. Add or remove a member and the key rotates: removed members can't read
+          anything sent after they left.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Auto-delete</div>
+          <p>In any conversation, tap <strong>Auto-delete</strong> to expire messages from
+          <em>your</em> device (1h–7d). The other side keeps their copy until they set their own
+          timer. The relay independently deletes all envelopes after 24 hours.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-heading">Honest limitations</div>
           <ol>
-            <li>Create an identity with a strong App Password — or restore one from a 12-word seed phrase</li>
-            <li>Tap <strong>Key</strong> → <strong>Copy Key</strong> — your key is two P-256 public keys joined by a colon (<code>ecdhKey:signingKey</code>). Share this string out-of-band with your contact (Signal, in person, etc.)</li>
-            <li>Have them share their key string with you → tap <strong>+ Add → By Key</strong>, paste it, and give them a name</li>
-            <li><strong>Alternatively:</strong> tap <strong>+ Add → By Code</strong>, generate a 6-character discovery code, and share it verbally. Your contact enters it on their side — keys exchange instantly, no long strings needed. The code expires after 10 minutes.</li>
-            <li>Tap <strong>Set</strong> → enter the Worker URL → Save</li>
+            <li><strong>Keys are trusted on first use.</strong> There are no safety numbers yet. For high-stakes contacts, exchange QR codes in person, or compare your identicons over a channel you trust.</li>
+            <li><strong>Forward secrecy is sender-side only.</strong> If your long-term key leaks, messages previously <em>sent to you</em> that an attacker recorded could be decrypted. (Sent messages stay safe — their ephemeral keys are gone.)</li>
+            <li><strong>Local history is readable on your device.</strong> Use your OS's disk encryption and screen lock; the App Password protects keys, not the message database.</li>
+            <li><strong>Relays see metadata.</strong> Timing, padded sizes, and IPs. The demo relay is shared; run your own to control it.</li>
+            <li><strong>iOS can evict browser data</strong> after ~7 days of disuse. Install to your Home Screen and write down your 12 words.</li>
           </ol>
-        </div>
-
-        <div class="about-section">
-          <div class="about-heading">Group Chats</div>
-          <p>Tap <strong>+ Group</strong> to create a group from your existing contacts. Groups use a shared <strong>AES-256-GCM</strong> key distributed to each member over the existing encrypted 1:1 channel — the relay sees the group only as an anonymous hash address and is unaware it is serving a group. When you add or remove a member, a new key is generated and distributed to current members only; the removed member cannot read future messages.</p>
-        </div>
-
-        <div class="about-section">
-          <div class="about-heading">Message Autodestruct</div>
-          <p>In any conversation, tap <strong>Timer</strong> to set a local expiry (1h – 7d). Messages older than that threshold are deleted from your device on every app load. The relay independently prunes all envelopes after 24 hours server-side. Tell your contact your local setting — their copy is independent.</p>
         </div>
 
         <div class="modal-actions">
           <button id="btn-close-about" class="btn-secondary" style="flex:none;">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MODAL: iOS install instructions                                    -->
+    <!-- ================================================================ -->
+    <div id="modal-ios-install" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <div class="modal-title">Add to your Home Screen</div>
+        <ol class="install-steps">
+          <li>Tap the <strong>Share</strong> button in Safari's toolbar (the square with the arrow pointing up)</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong></li>
+          <li>Tap <strong>Add</strong> — B.E.Chat opens full-screen like a native app</li>
+        </ol>
+        <div class="device-note">Installing also tells iOS to keep this site's data, so your messages and keys aren't evicted if you don't open the app for a while.</div>
+        <div class="modal-actions">
+          <button id="btn-close-ios-install" class="btn-secondary">Close</button>
         </div>
       </div>
     </div>
@@ -1861,9 +2319,9 @@
     <!-- ================================================================ -->
     <div id="modal-chat-settings" class="modal hidden" role="dialog" aria-modal="true">
       <div class="modal-box">
-        <div class="modal-title">Message Autodestruct</div>
+        <div class="modal-title">Auto-delete messages</div>
         <p class="ttl-desc">
-          Messages in this conversation will be deleted from <strong>your device</strong> after the selected time. This does not affect the recipient's copy — share your setting with them so both sides stay in sync.
+          Messages in this conversation are deleted from <strong>your device</strong> after the selected time. The other person keeps their copy until they set their own timer — tell them your setting so both sides match.
         </p>
 
         <div class="ttl-grid" id="ttl-grid"></div>

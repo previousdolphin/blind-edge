@@ -4,6 +4,79 @@ All notable changes to B.E.Chat are documented here.
 
 ---
 
+## v1.5.0 — 2026-06-11 Onboarding, trust & installability overhaul
+
+### Fixed — Critical recovery bugs
+
+**BIP39 wordlist was truncated (1906 of 2048 words)**
+Any generated phrase hitting a word index ≥ 1906 produced `undefined` words —
+roughly half of new seed-derived identities could not be written down or
+restored. Replaced with the official BIP39 English list (verified against the
+canonical SHA-256) and added conformance tests with official spec vectors.
+
+**`mnemonicToEntropy` bit-packing error**
+A negative shift count (`val << (5 - bitShift)` with bitShift > 5, which JS
+wraps mod 32) silently corrupted the repacked entropy, failing the checksum
+for most real mnemonics — seed-phrase restore was effectively broken. Fixed
+with explicit 24-bit window packing; fuzz-tested over 500 round-trips.
+
+**Seed reveal was broken** — `doRevealSeedPhrase` called async
+`entropyToMnemonic` without `await`, throwing at runtime.
+
+### Changed — Identity & recovery
+
+- **Seed-first identities**: every new identity is derived from fresh BIP39
+  entropy, so every identity has 12 recovery words (previously password-created
+  identities had none). Same words → same keys → same address on any device.
+- **Recovery entropy is now sealed inside the encrypted vault** (was plaintext
+  in localStorage for restored identities). Legacy bundles are rewrapped
+  automatically on the next successful unlock.
+- Pre-seed identities get an honest in-app note: their backup is the JSON
+  export; no retroactive phrase is possible.
+
+### Added — Onboarding & trust surfaces
+
+- Welcome screen explaining the model in three cards before any password prompt
+- Post-generation seed-backup step: "I wrote them down" or a first-class
+  "Skip — disposable session" burner path, both with plain-language stakes
+- "You're ready" screen: identicon, address, and your QR
+- "What's on this device" live inventory in Settings (sizes, counts, the honest
+  plaintext-at-rest caveat)
+- "Show me the actual bytes" — inspect the last real envelope sent to the relay
+- Reworked How-it-works explainer: device storage / relay table with metadata
+  row / lost-keys / burner mode / honest limitations
+- Relay status indicator (connected / unreachable — will retry); sync failures
+  are no longer silent
+- "Lock & Clear Session" renamed to **Lock** (it never cleared anything) and a
+  real **Delete this identity from this device** action added
+
+### Added — Contact exchange
+
+- **QR key exchange**: own-code zero-dependency QR encoder (byte mode, ECC L,
+  v1–15, full mask selection; verified against Apple's Vision decoder). QRs
+  encode a `#add=` deep link the native camera opens — no in-app scanner needed.
+- Share-code flow merged to one tap ("Get a share code") with a live countdown
+- Didactic-but-brief security notes at each exchange surface (expandable "why")
+
+### Added — PWA installability
+
+- Real app icons (icon.svg source + 512/192/apple-touch PNGs) — Android
+  install was previously broken by missing icon files
+- `beforeinstallprompt` capture + "Install as an app" in Settings; guided
+  Add-to-Home-Screen sheet for iOS
+- Manifest fixes (`id`, `scope`, split any/maskable purposes)
+
+### Added — Repo hygiene
+
+- LICENSE (MIT), SECURITY.md (threat model + scope), CONTRIBUTING.md,
+  GitHub Actions test workflow, package.json metadata
+- Test suite 18 → 36: BIP39 official vectors, identity vault round-trips,
+  QR structural + Reed-Solomon verification
+- Module docstrings in crypto.js / storage.js / worker explaining the security
+  rationale inline
+
+---
+
 ## v1.2.0 — 2026-05-12 Cryptographic protocol upgrade
 
 ### Security — Cryptography
