@@ -609,6 +609,70 @@
     }
 
     /* ------------------------------------------------------------------ */
+    /* Connection requests                                                  */
+    /* ------------------------------------------------------------------ */
+    #contact-requests {
+      border-bottom: 1px solid #1a1a1a;
+      background: rgba(74, 222, 128, 0.025);
+      flex-shrink: 0;
+    }
+
+    .requests-header {
+      font-size: 11px;
+      color: #4ade80;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 10px 16px 4px;
+    }
+
+    .request-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px 12px;
+    }
+
+    .request-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .request-addr {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #888;
+    }
+
+    .request-name {
+      margin-bottom: 0 !important;
+      padding: 6px 10px !important;
+      font-size: 13px !important;
+    }
+
+    .btn-accept-request {
+      background: #4ade80;
+      color: #0a0a0a;
+      font-weight: 600;
+      font-size: 12px;
+      padding: 7px 12px;
+      flex-shrink: 0;
+    }
+
+    .btn-decline-request {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #666;
+      font-size: 12px;
+      padding: 7px 10px;
+      flex-shrink: 0;
+    }
+
+    .btn-decline-request:hover { color: #ef4444; border-color: #ef444455; }
+
+    /* ------------------------------------------------------------------ */
     /* Empty state                                                          */
     /* ------------------------------------------------------------------ */
     .empty-state {
@@ -1694,6 +1758,7 @@
             <a id="link-welcome-import">Restore it</a>
           </div>
           <a class="about-link" id="link-about-welcome">How does this actually work? &rarr;</a>
+          <a class="about-link" href="intro.html">Take the 60-second tour &rarr;</a>
         </div>
       </div>
 
@@ -1930,6 +1995,7 @@
               <button id="btn-add-contact">+ Add</button>
             </div>
           </div>
+          <div id="contact-requests" class="hidden"></div>
           <div id="contact-list"></div>
           <div id="contact-empty" class="empty-state hidden">
             <p>No conversations yet.</p>

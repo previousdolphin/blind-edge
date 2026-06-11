@@ -355,6 +355,7 @@ async function refreshContacts() {
     state.storage.getGroups(),
   ]);
   renderContactList();
+  await renderContactRequests();
 }
 
 function renderContactList() {
@@ -696,7 +697,11 @@ async function runSync(serverUrl) {
 
     for (const env of sorted) {
       const contact = await state.storage.getContactByPubKeyHash(env.senderHash);
-      if (!contact) { if (env.createdAt > maxTs) maxTs = env.createdAt; continue; }
+      if (!contact) {
+        await _handleUnknownSenderEnvelope(env);
+        if (env.createdAt > maxTs) maxTs = env.createdAt;
+        continue;
+      }
 
       try {
         const inner = decodeInnerEnvelope(env.ciphertext);
@@ -727,6 +732,10 @@ async function runSync(serverUrl) {
             isSystem = true;
           } else if (parsed?.type === 'group-key-update') {
             await handleGroupKeyUpdate(parsed);
+            isSystem = true;
+          } else if (parsed?.type === 'contact-request') {
+            // Introduction from someone we already have (e.g. re-fetched after
+            // the cursor rewind on accept) — nothing to do, don't show as a chat bubble.
             isSystem = true;
           }
         } catch (_) {}
@@ -873,6 +882,103 @@ async function handleGroupKeyUpdate(payload) {
   if (state.activeGroupId === group.id) {
     state.activeGroupMembers = await state.storage.getGroupMembers(group.id);
   }
+}
+
+// ─── Connection requests ──────────────────────────────────────────────────────
+// Adding someone is one-directional, so the app introduces you automatically:
+// an encrypted "contact-request" carrying YOUR public keys goes to them, and
+// shows up on their side as an accept/decline prompt. This is what makes
+// "scan their QR → start chatting" actually work without a manual add-back.
+
+async function _sendContactRequest(contactId, theirPubKeyHex) {
+  if (theirPubKeyHex === state.ecdhPubKeyHex) return; // self-add (loopback) — nothing to introduce
+  try {
+    await _sendGroupSystemMessage(
+      { id: contactId, pubKeyHex: theirPubKeyHex },
+      { type: 'contact-request', ecdhPubHex: state.ecdhPubKeyHex, signPubHex: state.signPubKeyHex }
+    );
+  } catch (e) {
+    showToast('Added locally, but the introduction failed to send — ask them to add you back.', 'info');
+  }
+}
+
+// An envelope from an unknown sender is normally dropped — except a valid
+// contact-request, which we can decrypt with our own private key alone.
+// Two bindings keep it honest: the claimed ECDH key must hash to the
+// envelope's sender address, and the envelope signature must verify against
+// the claimed signing key.
+async function _handleUnknownSenderEnvelope(env) {
+  try {
+    const inner = decodeInnerEnvelope(env.ciphertext);
+    const { plaintext } = await SecurityManager.decryptMessageEphemeral(
+      inner, state.ecdhKeypair.privateKey, state.ecdhPubKeyHex, null
+    );
+    const req = JSON.parse(plaintext);
+    if (req?.type !== 'contact-request' || typeof req.ecdhPubHex !== 'string') return;
+
+    const hashBuf = await crypto.subtle.digest('SHA-256', hexToBytes(req.ecdhPubHex));
+    if (bytesToHex(new Uint8Array(hashBuf)) !== env.senderHash) return; // key↔address mismatch
+
+    if (req.signPubHex) {
+      // re-run with signature verification against the claimed signing key
+      const pub = await SecurityManager.importSignPublicKeyHex(req.signPubHex);
+      await SecurityManager.decryptMessageEphemeral(
+        inner, state.ecdhKeypair.privateKey, state.ecdhPubKeyHex, pub
+      ); // throws if the signature doesn't verify
+    }
+
+    const saved = await state.storage.addContactRequest(req.ecdhPubHex, req.signPubHex || null);
+    if (saved) {
+      await renderContactRequests();
+      showToast('Someone wants to connect — check Conversations.', 'info');
+    }
+  } catch (_) {
+    // not a contact-request, or malformed — drop as before
+  }
+}
+
+async function renderContactRequests() {
+  const requests = await state.storage.getContactRequests();
+  const wrap = $id('contact-requests');
+  wrap.classList.toggle('hidden', !requests.length);
+  if (!requests.length) { wrap.innerHTML = ''; return; }
+
+  wrap.innerHTML = `<div class="requests-header">Connection request${requests.length === 1 ? '' : 's'}</div>` +
+    (await Promise.all(requests.map(async r => {
+      const hashBuf = await crypto.subtle.digest('SHA-256', hexToBytes(r.ecdhPubHex));
+      const hash = bytesToHex(new Uint8Array(hashBuf));
+      return `
+        <div class="request-item" data-ecdh="${r.ecdhPubHex}" data-sign="${r.signPubHex || ''}">
+          <div class="contact-avatar">${generateIdenticon(r.ecdhPubHex, 32)}</div>
+          <div class="request-info">
+            <div class="request-addr">${hash.slice(0, 12)}…</div>
+            <input type="text" class="request-name" placeholder="Name them" autocomplete="off" autocapitalize="words">
+          </div>
+          <button class="btn-accept-request" title="Accept and connect">Accept</button>
+          <button class="btn-decline-request" title="Decline">✕</button>
+        </div>`;
+    }))).join('');
+
+  wrap.querySelectorAll('.request-item').forEach(item => {
+    item.querySelector('.btn-accept-request').addEventListener('click', async () => {
+      const name = item.querySelector('.request-name').value.trim();
+      if (!name) { item.querySelector('.request-name').focus(); return; }
+      const ecdh = item.dataset.ecdh;
+      await state.storage.addContact(name, ecdh, item.dataset.sign || null);
+      await state.storage.deleteContactRequest(ecdh);
+      // Rewind the sync cursor: anything they sent before we accepted —
+      // messages, group invites — gets fetched and processed now. Replay
+      // counters and remote_id dedup make re-fetching old envelopes safe.
+      await state.storage.setSetting('lastSync', '0');
+      await renderContactRequests();
+      await refreshContacts();
+      showToast(`${name} connected — fetching anything they already sent…`, 'success');
+    });
+    item.querySelector('.btn-decline-request').addEventListener('click', async () => {
+      await state.storage.deleteContactRequest(item.dataset.ecdh);
+      await renderContactRequests();
+    });
+  });
 }
 
 // Deliver a group control message (invite / key-update) over the 1:1 channel.
@@ -1201,12 +1307,14 @@ async function addContact() {
   }
 
   try {
-    await state.storage.addContact(name, ecdhHex, signHex);
+    const id = await state.storage.addContact(name, ecdhHex, signHex);
     $id('contact-name-input').value = '';
     $id('contact-key-input').value = '';
     closeModal('modal-add-contact');
     await refreshContacts();
-    showToast(signHex ? `${name} added` : `${name} added (legacy contact — signatures disabled)`, signHex ? 'success' : 'info');
+    showToast(signHex ? `${name} added — sending them an introduction…` : `${name} added (legacy contact — signatures disabled)`, signHex ? 'success' : 'info');
+    // Introduce yourself so they can accept instead of manually adding you back
+    await _sendContactRequest(id, ecdhHex);
   } catch (e) {
     showErr('contact-error', e.message.includes('UNIQUE') ? 'That key is already saved.' : 'Failed to save contact.');
   }
@@ -1369,10 +1477,11 @@ async function lookupDiscoveryCode() {
     if (!res.ok) throw new Error('Server error');
     const { public_key } = await res.json();
     const [ecdhHex, signHex] = public_key.includes(':') ? public_key.split(':') : [public_key, null];
-    await state.storage.addContact(name, ecdhHex, signHex || null);
+    const id = await state.storage.addContact(name, ecdhHex, signHex || null);
     closeModal('modal-add-contact');
     await refreshContacts();
-    showToast(`${name} added via share code`, 'success');
+    showToast(`${name} added — sending them an introduction…`, 'success');
+    await _sendContactRequest(id, ecdhHex);
   } catch (e) {
     if (!$id('lookup-error').textContent) showToast('Lookup failed: ' + e.message, 'error');
   } finally {

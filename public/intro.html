@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060806">
+<meta name="description" content="B.E.Chat — how a blind relay works. A 60-second scrolling tour of the protocol.">
+<title>How B.E.Chat works — the blind relay, in 60 seconds</title>
+<link rel="icon" href="icon-192.png" type="image/png">
+<!--
+  External code used by THIS PAGE ONLY (presentation, never touches keys or messages):
+    · three.js r147  — cdnjs.cloudflare.com/ajax/libs/three.js/0.147.0/three.min.js
+    · GSAP 3.12 + ScrollTrigger — cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/
+    · Google Fonts   — Space Mono, JetBrains Mono
+  Everything else on this page (including the QR encoder, ./qr.js) is this repo's own code.
+  The app itself (index.html) uses zero runtime libraries beyond sql.js WASM — see README.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* ── defensive defaults ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { max-width: 100%; }
+  img, video, iframe, svg, canvas { max-width: 100%; height: auto; }
+  pre, code { overflow-x: auto; max-width: 100%; }
+  p, h1, h2, h3, li, a, figcaption { overflow-wrap: anywhere; }
+
+  :root {
+    --bg: #060806;
+    --ink: #d6e2d6;
+    --dim: #7e8c7e;
+    --faint: #3d473d;
+    --green: #4ade80;
+    --green-dim: #2ea35f;
+    --green-deep: #166534;
+    --hair: #1a221a;
+    --amber: #d9a648;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 1.75;
+    overflow-x: clip;
+  }
+
+  ::selection { background: rgba(74, 222, 128, .3); }
+
+  /* ── three.js backdrop ──────────────────────────────────────────── */
+  #space { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; }
+
+  /* phosphor scanlines + grain, very faint */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 3; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px);
+    opacity: .35;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: .4;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  main { position: relative; z-index: 1; }
+
+  /* ── shared type ────────────────────────────────────────────────── */
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: .3em;
+    color: var(--green);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .eyebrow::before { content: '// '; color: var(--faint); }
+
+  .display {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: clamp(26px, 5.4vw, 58px);
+    line-height: 1.12;
+    letter-spacing: -.015em;
+  }
+  .display .g { color: var(--green); }
+
+  .cursor::after {
+    content: '█';
+    color: var(--green);
+    animation: blink 1.1s steps(1) infinite;
+    margin-left: .08em;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .body-copy {
+    font-size: clamp(13px, 1.6vw, 15px);
+    color: var(--dim);
+    max-width: 62ch;
+    margin-top: 24px;
+  }
+  .body-copy strong { color: var(--ink); font-weight: 500; }
+
+  .mono-note { font-size: 11px; color: var(--faint); letter-spacing: .04em; }
+
+  .rule {
+    margin-top: 26px;
+    color: var(--faint);
+    font-size: 12px;
+    letter-spacing: 0;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  section {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 14vh clamp(20px, 7vw, 110px);
+    position: relative;
+  }
+
+  .num {
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: .2em;
+    position: absolute;
+    top: 7vh;
+    right: clamp(20px, 7vw, 110px);
+  }
+  .num::before { content: '['; color: var(--green-deep); }
+  .num::after  { content: ']'; color: var(--green-deep); }
+
+  /* ── hero ───────────────────────────────────────────────────────── */
+  .boot {
+    font-size: 11px;
+    color: var(--faint);
+    margin-bottom: 26px;
+    line-height: 2;
+  }
+  .boot .ok { color: var(--green-dim); }
+
+  .scroll-cue {
+    position: absolute;
+    bottom: 5vh;
+    left: clamp(20px, 7vw, 110px);
+    font-size: 11px;
+    letter-spacing: .25em;
+    color: var(--faint);
+    text-transform: uppercase;
+  }
+  .scroll-cue::before { content: '▼ '; color: var(--green-deep); animation: blink 1.6s steps(1) infinite; }
+
+  /* ── derivation ticker (sec 1) ──────────────────────────────────── */
+  .derive {
+    margin-top: 36px;
+    font-size: clamp(10.5px, 1.5vw, 13px);
+    line-height: 2.2;
+    color: var(--faint);
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    background: rgba(0,0,0,.35);
+    padding: clamp(12px, 2.5vw, 22px) clamp(14px, 2.5vw, 26px);
+    max-width: 720px;
+  }
+  .derive .bar {
+    color: var(--faint);
+    display: block;
+    border-bottom: 1px solid var(--hair);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    font-size: 10.5px;
+    letter-spacing: .15em;
+  }
+  .derive .step { display: block; opacity: 0; }
+  .derive .step::before { content: '$ '; color: var(--green-deep); }
+  .derive .ok { color: var(--green); }
+  .derive .ok::before { content: '✓ '; }
+  .derive .lit { color: var(--ink); }
+
+  /* ── phones (sec 2) ─────────────────────────────────────────────── */
+  .stage {
+    margin-top: 46px;
+    display: flex;
+    gap: clamp(18px, 6vw, 90px);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .stage > * { min-width: 0; }
+
+  .phone {
+    width: min(224px, 42vw);
+    aspect-ratio: 9 / 18.5;
+    border: 1px solid #243024;
+    border-radius: 14px;
+    background: linear-gradient(165deg, #0c100c, #060806);
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 1px 0 rgba(214,226,214,.05);
+    padding: 13px 11px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .phone::before {
+    content: '';
+    position: absolute; top: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 52px; height: 4px; border-radius: 2px; background: #1a221a;
+  }
+  .phone .screen {
+    position: absolute; inset: 20px 11px 13px;
+    border-radius: 8px;
+    background: #070907;
+    border: 1px solid #141b14;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; padding: 12px;
+  }
+  .phone .tag {
+    font-size: 9px; letter-spacing: .25em;
+    color: var(--faint); text-transform: uppercase;
+  }
+  .phone .tag::before { content: '['; }
+  .phone .tag::after  { content: ']'; }
+
+  .qr-wrap { background: #e9f0e9; border-radius: 6px; padding: 7px; line-height: 0; width: 72%; }
+  .qr-wrap svg { width: 100%; height: auto; display: block; }
+
+  .scanline {
+    position: absolute; left: 8%; right: 8%; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--green), transparent);
+    box-shadow: 0 0 18px var(--green);
+    top: 30%; opacity: 0;
+  }
+
+  .req-chip {
+    position: absolute; left: 8%; right: 8%; bottom: 10%;
+    background: rgba(74,222,128,.07);
+    border: 1px solid rgba(74,222,128,.4);
+    border-radius: 6px;
+    padding: 9px 10px;
+    font-size: 9.5px; color: var(--ink);
+    opacity: 0; line-height: 1.7;
+  }
+  .req-chip::before { content: '> '; color: var(--green); }
+  .req-chip .accept {
+    display: inline-block; margin-top: 5px;
+    background: var(--green); color: #04130a;
+    font-weight: 700; border-radius: 3px; padding: 3px 9px;
+    letter-spacing: .1em;
+  }
+
+  .bubbles { width: 86%; display: flex; flex-direction: column; gap: 7px; opacity: 0; }
+  .bubble {
+    font-size: 9.5px; line-height: 1.55;
+    padding: 7px 10px; border-radius: 6px; max-width: 92%;
+  }
+  .bubble.out { align-self: flex-end; background: #10231a; border: 1px solid rgba(74,222,128,.3); }
+  .bubble.in  { align-self: flex-start; background: #101510; border: 1px solid #1f2a1f; }
+
+  .between {
+    flex: 1 1 120px; min-width: 110px;
+    text-align: center;
+    font-size: 10.5px; color: var(--faint);
+    letter-spacing: .12em; line-height: 2.5;
+  }
+  .between .arrow { color: var(--green); display: block; font-size: 14px; }
+
+  /* ── relay diagram (sec 3) ──────────────────────────────────────── */
+  .wire {
+    margin-top: 44px;
+    display: flex; align-items: center;
+    gap: clamp(8px, 2.5vw, 28px);
+    flex-wrap: wrap;
+  }
+  .wire > * { min-width: 0; }
+
+  .node {
+    border: 1px solid #243024;
+    border-radius: 4px;
+    padding: 12px 15px;
+    font-size: 11px; color: var(--dim);
+    text-align: center; line-height: 1.9;
+    flex-shrink: 0;
+    background: rgba(0,0,0,.3);
+  }
+  .node b { color: var(--ink); font-weight: 700; display: block; letter-spacing: .2em; font-family: 'Space Mono', monospace; }
+  .node.relay { border-color: rgba(74,222,128,.35); position: relative; }
+  .node.relay::after {
+    content: '';
+    position: absolute; left: -1px; right: -1px; top: 40%; height: 8px;
+    background: linear-gradient(90deg, var(--green-deep), var(--green), #15803d);
+    border-radius: 2px; opacity: .85;
+  }
+
+  .cipher {
+    flex: 1 1 150px;
+    font-size: clamp(9px, 1.3vw, 11px);
+    color: var(--green);
+    word-break: break-all; line-height: 1.9;
+    min-width: 130px; opacity: .9;
+  }
+  .cipher::before { content: '>> '; color: var(--faint); }
+
+  .sees {
+    margin-top: 40px; width: 100%; max-width: 560px;
+    font-size: clamp(10.5px, 1.4vw, 12.5px);
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    background: rgba(0,0,0,.35);
+    padding: 6px 14px;
+  }
+  .sees .row {
+    display: flex; justify-content: space-between; gap: 14px;
+    padding: 9px 2px;
+    border-bottom: 1px solid var(--hair);
+    color: var(--dim);
+  }
+  .sees .row:last-child { border-bottom: none; }
+  .sees .row span:last-child { color: var(--faint); text-align: right; }
+  .sees .row span:last-child.never { color: var(--green); }
+
+  /* ── words / burner (sec 4) ─────────────────────────────────────── */
+  .forked {
+    margin-top: 44px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+    gap: clamp(16px, 4vw, 48px);
+  }
+  .forked > * { min-width: 0; }
+
+  .fork {
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    padding: clamp(20px, 3vw, 32px);
+    background: rgba(0,0,0,.3);
+    position: relative;
+  }
+  .fork::before {
+    content: attr(data-opt);
+    position: absolute; top: -9px; left: 14px;
+    background: var(--bg);
+    padding: 0 8px;
+    font-size: 10px; letter-spacing: .2em;
+    color: var(--green-dim);
+  }
+  .fork h3 {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: clamp(17px, 2.2vw, 23px);
+    margin-bottom: 12px;
+  }
+  .fork h3 .g { color: var(--green); }
+  .fork p { color: var(--dim); font-size: 13px; }
+
+  .words { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 20px; }
+  .word {
+    font-size: 11px; color: var(--ink);
+    border: 1px solid #243024; background: #0a0e0a;
+    border-radius: 3px; padding: 5px 9px; opacity: 0;
+  }
+  .word i { font-style: normal; color: var(--faint); margin-right: 5px; }
+
+  .burner-art { margin-top: 20px; font-size: 11px; color: var(--faint); letter-spacing: .06em; line-height: 2.2; }
+  .burner-art .id-line { display: block; }
+  .burner-art .id-line::before { content: '$ '; color: var(--green-deep); }
+
+  /* ── CTA ────────────────────────────────────────────────────────── */
+  #cta { text-align: center; align-items: center; }
+
+  .cta-row { margin-top: 42px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+
+  .btn {
+    font-size: 12.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border-radius: 4px;
+    padding: 15px 28px;
+    font-weight: 700;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, color .16s ease;
+  }
+  .btn.primary { background: var(--green); color: #04130a; }
+  .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 14px 44px rgba(74,222,128,.28); }
+  .btn.ghost { color: var(--dim); border: 1px solid #2a362a; font-weight: 400; }
+  .btn.ghost:hover { color: var(--ink); border-color: var(--green-dim); }
+
+  footer {
+    position: relative; z-index: 1;
+    text-align: center;
+    padding: 30px 20px 44px;
+    font-size: 11px; color: var(--faint); letter-spacing: .08em;
+  }
+  footer a { color: var(--dim); text-decoration: none; }
+  footer a:hover { color: var(--green); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor::after, .scroll-cue::before { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="space" aria-hidden="true"></canvas>
+
+<main>
+
+  <!-- 00 · HERO -->
+  <section id="hero">
+    <div class="boot reveal">
+      <span class="ok">ok</span> keys… local&nbsp;&nbsp;<span class="ok">ok</span> history… local&nbsp;&nbsp;<span class="ok">ok</span> servers that know you… <span style="color:var(--amber)">none found</span>
+    </div>
+    <p class="eyebrow reveal">blind-edge protocol · a 60-second tour</p>
+    <h1 class="display reveal cursor">The server can't<br>read this. <span class="g">Not won't.<br>Can't.</span></h1>
+    <p class="body-copy reveal">B.E.Chat is end-to-end encrypted messaging where <strong>everything lives on your device</strong> — keys, history, identity. The relay in the middle is blind by construction, and anyone can run one.</p>
+    <div class="scroll-cue">scroll</div>
+  </section>
+
+  <!-- 01 · KEYS -->
+  <section id="keys">
+    <span class="num">01 / 04</span>
+    <p class="eyebrow reveal">no accounts</p>
+    <h2 class="display reveal">Your keys are<br><span class="g">born here.</span></h2>
+    <p class="body-copy reveal">Tap once and your browser derives a cryptographic identity from 12 random words — locally, with the platform's native crypto. <strong>Nothing is sent anywhere.</strong> No e-mail, no phone number, no signup. The words can resurrect your identity on any device; the keys never leave this one.</p>
+    <div class="derive" id="derive">
+      <span class="bar">identity.derive — local only</span>
+      <span class="step">entropy   ← crypto.getRandomValues(16 bytes)</span>
+      <span class="step">words[12] ← BIP-39(entropy)  <span class="lit">"audit arctic luggage …"</span></span>
+      <span class="step">seed      ← PBKDF2-SHA512(words)</span>
+      <span class="step">identity  ← HKDF(seed) → P-256 × 2</span>
+      <span class="step ok">address 8d506e83… created on-device. network calls: 0</span>
+    </div>
+  </section>
+
+  <!-- 02 · SCAN -->
+  <section id="scan">
+    <span class="num">02 / 04</span>
+    <p class="eyebrow reveal">onboarding, the whole thing</p>
+    <h2 class="display reveal">Scan. Accept. <span class="g">Chat.</span></h2>
+    <p class="body-copy reveal">Your QR is a camera link carrying your <strong>public</strong> key. When a friend scans it, their app introduces them to you with an encrypted hello — you tap <strong>accept</strong>, and even the messages they sent while you were deciding arrive. That's the entire ceremony.</p>
+
+    <div class="stage">
+      <div class="phone" id="phoneA">
+        <div class="screen">
+          <span class="tag">you</span>
+          <div class="qr-wrap" id="intro-qr"></div>
+          <span class="tag" style="letter-spacing:.08em">public key, as a picture</span>
+          <div class="req-chip" id="reqChip">
+            dana wants to connect<br>
+            <span class="accept">ACCEPT</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="between">
+        <span class="arrow">⇄</span>
+        encrypted<br>introduction<br>
+        <span class="mono-note">relay sees: nothing legible</span>
+      </div>
+
+      <div class="phone" id="phoneB">
+        <div class="screen">
+          <span class="tag">your friend</span>
+          <div class="scanline" id="scanline"></div>
+          <div class="bubbles" id="introBubbles">
+            <div class="bubble out">hey — found you by camera</div>
+            <div class="bubble in">and not a username in sight</div>
+            <div class="bubble out">sealed end-to-end ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 · RELAY -->
+  <section id="relay">
+    <span class="num">03 / 04</span>
+    <p class="eyebrow reveal">the blind middleman</p>
+    <h2 class="display reveal">It carries envelopes.<br><span class="g">Never letters.</span></h2>
+    <p class="body-copy reveal">Every message gets a fresh ephemeral key, is padded so its length says nothing, sealed with AES-256, signed, and addressed to a <strong>hash</strong> — a number, not a name. The relay stores it for at most 24 hours and hands it to whoever presents that number. It can't do anything else. It's ~200 lines of code; <strong>run your own.</strong></p>
+
+    <div class="wire">
+      <div class="node"><b>YOU</b>plaintext, briefly</div>
+      <div class="cipher" id="cipherText">how about midnight?</div>
+      <div class="node relay"><b>RELAY</b><br>blind</div>
+      <div class="cipher" id="cipherText2">9f2c41ab07de…</div>
+      <div class="node"><b>THEM</b>plaintext again</div>
+    </div>
+
+    <div class="sees reveal">
+      <div class="row"><span>message content</span><span class="never">never</span></div>
+      <div class="row"><span>names, profiles, accounts</span><span class="never">don't exist</span></div>
+      <div class="row"><span>sender / recipient</span><span>sha-256 hashes</span></div>
+      <div class="row"><span>timing &amp; padded size</span><span>yes — run your own relay</span></div>
+    </div>
+  </section>
+
+  <!-- 04 · WORDS / BURNER -->
+  <section id="forever">
+    <span class="num">04 / 04</span>
+    <p class="eyebrow reveal">your identity, your call</p>
+    <h2 class="display reveal">Keep it forever.<br><span class="g">Or burn it.</span></h2>
+
+    <div class="forked">
+      <div class="fork" id="forkKeep" data-opt="OPTION A">
+        <h3>Write down <span class="g">12 words</span></h3>
+        <p>They recreate your exact keys on any device — same address, your contacts still reach you. History never leaves your devices, so there's nothing for anyone else to recover. That's the design.</p>
+        <div class="words" id="wordRow"></div>
+      </div>
+      <div class="fork" id="forkBurn" data-opt="OPTION B">
+        <h3>Or use a <span class="g">burner</span></h3>
+        <p>Skip the backup. Talk for a night, delete the identity, and it's gone everywhere — because it never existed anywhere else. A fresh one takes five seconds.</p>
+        <div class="burner-art" id="burnerArt">
+          <span class="id-line">identity  8d506e83…26686b52</span>
+          <span class="id-line">history   3 conversations, local only</span>
+          <span class="id-line">status    <span style="color:var(--green)">deleted. everywhere. instantly.</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section id="cta">
+    <p class="eyebrow reveal">free · open source · no install needed</p>
+    <h2 class="display reveal">Sixty seconds.<br><span class="g">Two phones.</span></h2>
+    <p class="body-copy reveal" style="margin-inline:auto">Open it, make an identity, point a camera. The whole stack — app, protocol, relay — is MIT-licensed and self-hostable in an afternoon.</p>
+    <div class="cta-row reveal">
+      <a class="btn primary" href="/">Open B.E.Chat</a>
+      <a class="btn ghost" href="https://github.com/previousdolphin/blind-edge">Read the protocol</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  blind-edge protocol · mit license · <a href="https://github.com/previousdolphin/blind-edge">github</a> · built with claude code
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.147.0/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script type="module">
+  import { encodeToSvg } from './qr.js';
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── real, scannable QR of the live app ─────────────────────────── */
+  try {
+    document.getElementById('intro-qr').innerHTML =
+      encodeToSvg('https://blind-edge.pages.dev', { modulePx: 6, light: '#e9f0e9', dark: '#0a0e0a' });
+  } catch (_) {}
+
+  /* ── three.js: the blinded ninja, in low-poly 3D ──────────────────
+     A flat-shaded re-build of the app logo: dark hooded head, glowing
+     green blindfold band, knot + tails. Encrypted pulses fly THROUGH
+     his head — he carries them, he just can't see them.            */
+  const canvas = document.getElementById('space');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x060806, 0.05);
+
+  const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 100);
+  camera.position.set(0, 0, 13);
+
+  scene.add(new THREE.AmbientLight(0x223322, 1.4));
+  const keyLight = new THREE.DirectionalLight(0x9adcb2, 0.7);
+  keyLight.position.set(-4, 6, 8);
+  scene.add(keyLight);
+  const rim = new THREE.PointLight(0x4ade80, 1.1, 18);
+  rim.position.set(3.5, -1.5, 3);
+  scene.add(rim);
+
+  // ── the ninja ──
+  const ninja = new THREE.Group();
+
+  // hood: low-poly flat-shaded sphere, slightly egg-shaped
+  const hood = new THREE.Mesh(
+    new THREE.SphereGeometry(2.15, 14, 10),
+    new THREE.MeshLambertMaterial({ color: 0x141a14, flatShading: true })
+  );
+  hood.scale.set(1, 1.08, 1);
+  ninja.add(hood);
+
+  // hood wireframe ghost — retro CRT skeleton
+  ninja.add(new THREE.Mesh(
+    new THREE.SphereGeometry(2.18, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0x2a3a2a, wireframe: true, transparent: true, opacity: 0.35 })
+  ));
+
+  // blindfold band: open cylinder wrapped over the eyes
+  const band = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.26, 2.26, 0.62, 28, 1, true),
+    new THREE.MeshLambertMaterial({ color: 0x2ea35f, flatShading: true, emissive: 0x115527, side: THREE.DoubleSide })
+  );
+  band.position.y = 0.42;
+  ninja.add(band);
+
+  // band glow halo
+  const halo = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.34, 2.34, 0.8, 28, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  halo.position.y = 0.42;
+  ninja.add(halo);
+
+  // knot on the right
+  const knot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 8, 6),
+    new THREE.MeshLambertMaterial({ color: 0x166534, flatShading: true })
+  );
+  knot.position.set(2.25, 0.42, -0.4);
+  ninja.add(knot);
+
+  // tails: two flat tapered boxes trailing back-right
+  const tailMat = new THREE.MeshLambertMaterial({ color: 0x1d7a44, flatShading: true, side: THREE.DoubleSide });
+  const tailA = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.7, 4), tailMat);
+  tailA.position.set(3.1, 0.95, -0.7);
+  tailA.rotation.z = -1.1;
+  tailA.rotation.y = 0.4;
+  ninja.add(tailA);
+  const tailB = new THREE.Mesh(new THREE.ConeGeometry(0.2, 2.3, 4), tailMat);
+  tailB.position.set(3.2, -0.45, -0.6);
+  tailB.rotation.z = -2.1;
+  tailB.rotation.y = 0.3;
+  ninja.add(tailB);
+
+  // shoulders: a truncated cone below
+  const shoulders = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.1, 2.7, 1.6, 10, 1),
+    new THREE.MeshLambertMaterial({ color: 0x0e130e, flatShading: true })
+  );
+  shoulders.position.y = -3.0;
+  ninja.add(shoulders);
+
+  ninja.position.set(0, 0.4, 0);
+  scene.add(ninja);
+
+  // ── peers: a drifting constellation around him ──
+  const N = 650;
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = 9 + Math.random() * 14;
+    const t = Math.random() * Math.PI * 2;
+    const p = Math.acos(2 * Math.random() - 1);
+    pos[i * 3]     = r * Math.sin(p) * Math.cos(t);
+    pos[i * 3 + 1] = (r * Math.cos(p)) * 0.6;
+    pos[i * 3 + 2] = r * Math.sin(p) * Math.sin(t) - 6;
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+    color: 0x9adcb2, size: 0.045, transparent: true, opacity: 0.6,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  scene.add(stars);
+
+  // ── pulses: sealed envelopes passing through the blind head ──
+  const PULSES = reduced ? 0 : 7;
+  const pulses = [];
+  const pulseMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+  for (let i = 0; i < PULSES; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.02), pulseMat); // little envelopes
+    scene.add(m);
+    pulses.push({ m, t: Math.random(), speed: 0.0016 + Math.random() * 0.0022, a: null, b: null });
+  }
+  const randPeer = () => {
+    const i = (Math.random() * N) | 0;
+    return new THREE.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+  };
+  const rewire = p => { p.a = randPeer(); p.b = randPeer(); p.t = 0; };
+  pulses.forEach(rewire);
+
+  function resize() {
+    renderer.setSize(innerWidth, innerHeight, false);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  let scrollDepth = 0;
+  addEventListener('scroll', () => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    scrollDepth = max > 0 ? scrollY / max : 0;
+  }, { passive: true });
+
+  let mx = 0, my = 0;
+  addEventListener('pointermove', e => {
+    mx = (e.clientX / innerWidth - 0.5);
+    my = (e.clientY / innerHeight - 0.5);
+  }, { passive: true });
+
+  const mid = new THREE.Vector3();
+  renderer.setAnimationLoop(time => {
+    const t = time * 0.001;
+    stars.rotation.y = t * 0.012 + scrollDepth * 0.9;
+
+    // he slowly "looks around" — pointlessly, of course
+    ninja.rotation.y = Math.sin(t * 0.22) * 0.55 + scrollDepth * 1.4;
+    ninja.rotation.x = Math.sin(t * 0.13) * 0.06;
+    ninja.position.y = 0.4 + Math.sin(t * 0.5) * 0.12;
+
+    for (const p of pulses) {
+      p.t += p.speed * 16;
+      if (p.t >= 1) rewire(p);
+      mid.set(0, 0.6, 0);
+      const u = p.t;
+      const seg = u < 0.5 ? [p.a, mid, u * 2] : [mid, p.b, (u - 0.5) * 2];
+      p.m.position.lerpVectors(seg[0], seg[1], seg[2]);
+      p.m.lookAt(camera.position);
+      p.m.material.opacity = 0.35 + 0.65 * Math.sin(u * Math.PI);
+    }
+
+    camera.position.x += ((mx * 1.4) - camera.position.x) * 0.04;
+    camera.position.y += ((-my * 1.0 - scrollDepth * 2.0) - camera.position.y) * 0.05;
+    camera.position.z = 13 - scrollDepth * 3.2;
+    camera.lookAt(0, 0.4 - scrollDepth * 1.0, 0);
+
+    renderer.render(scene, camera);
+  });
+
+  /* ── GSAP scroll choreography ─────────────────────────────────────── */
+  gsap.registerPlugin(ScrollTrigger);
+
+  document.querySelectorAll('.reveal').forEach(el => {
+    gsap.from(el, {
+      y: 32, opacity: 0, duration: 1, ease: 'power3.out',
+      scrollTrigger: { trigger: el, start: 'top 86%' },
+    });
+  });
+
+  gsap.to('#derive .step', {
+    opacity: 1, duration: 0.45, stagger: 0.5, ease: 'none',
+    scrollTrigger: { trigger: '#derive', start: 'top 78%' },
+  });
+
+  const scanTl = gsap.timeline({
+    scrollTrigger: { trigger: '#scan .stage', start: 'top 72%' },
+  });
+  scanTl
+    .fromTo('#scanline', { opacity: 0, top: '18%' }, { opacity: 1, duration: 0.3 })
+    .to('#scanline', { top: '74%', duration: 1.1, ease: 'power1.inOut' })
+    .to('#scanline', { opacity: 0, duration: 0.3 })
+    .fromTo('#reqChip', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.55, ease: 'back.out(1.6)' }, '-=0.15')
+    .fromTo('#introBubbles', { opacity: 0 }, { opacity: 1, duration: 0.3 }, '+=0.5')
+    .from('#introBubbles .bubble', { y: 14, opacity: 0, stagger: 0.45, duration: 0.5, ease: 'power2.out' });
+
+  const HEX = '0123456789abcdef';
+  const cipherEl = document.getElementById('cipherText');
+  const plainMsg = 'how about midnight?';
+  ScrollTrigger.create({
+    trigger: '#relay .wire', start: 'top 75%',
+    onEnter: () => {
+      let i = 0;
+      const iv = setInterval(() => {
+        i++;
+        cipherEl.textContent = plainMsg.split('').map((ch, idx) =>
+          idx < i ? HEX[(Math.random() * 16) | 0] : ch
+        ).join('');
+        if (i > plainMsg.length) {
+          clearInterval(iv);
+          cipherEl.textContent = '9f2c41ab07de55c3a1b8…  (padded to 256 B)';
+        }
+      }, 55);
+      gsap.from('#cipherText2', { opacity: 0, duration: 0.8, delay: 1.4 });
+    },
+    once: true,
+  });
+
+  const WORDS = ['audit','arctic','luggage','belt','weasel','earth','sad','credit','true','certain','tumble','access'];
+  const row = document.getElementById('wordRow');
+  row.innerHTML = WORDS.map((w, i) => `<span class="word"><i>${String(i + 1).padStart(2, '0')}</i>${w}</span>`).join('');
+  gsap.to('#wordRow .word', {
+    opacity: 1, duration: 0.4, stagger: 0.09, ease: 'power1.out',
+    scrollTrigger: { trigger: '#forkKeep', start: 'top 75%' },
+  });
+  gsap.from('#burnerArt .id-line', {
+    opacity: 0, x: -12, stagger: 0.35, duration: 0.6,
+    scrollTrigger: { trigger: '#forkBurn', start: 'top 75%' },
+  });
+</script>
+</body>
+</html>

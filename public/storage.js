@@ -113,6 +113,13 @@ export class StorageManager {
         added_at     INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
       );
 
+      CREATE TABLE IF NOT EXISTS contact_requests (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ecdh_pub_hex TEXT NOT NULL UNIQUE,
+        sign_pub_hex TEXT,
+        received_at  INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+
       CREATE TABLE IF NOT EXISTS group_messages (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -438,6 +445,34 @@ export class StorageManager {
       'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
       [key, value]
     );
+    await this._persist();
+  }
+
+  // ─── Connection requests ────────────────────────────────────────────────────
+  // Pending "wants to connect" handshakes from senders we haven't added yet.
+
+  async addContactRequest(ecdhPubHex, signPubHex) {
+    // Ignore if already a contact or already pending
+    const existing = this._query('SELECT id FROM contacts WHERE pub_key_hex = ?', [ecdhPubHex]);
+    if (existing.length) return 0;
+    const pending = this._query('SELECT id FROM contact_requests WHERE ecdh_pub_hex = ?', [ecdhPubHex]);
+    if (pending.length) return 0;
+    this._db.run(
+      'INSERT OR IGNORE INTO contact_requests (ecdh_pub_hex, sign_pub_hex) VALUES (?, ?)',
+      [ecdhPubHex, signPubHex || null]
+    );
+    await this._persist();
+    return 1;
+  }
+
+  async getContactRequests() {
+    return this._query(
+      'SELECT id, ecdh_pub_hex as ecdhPubHex, sign_pub_hex as signPubHex, received_at as receivedAt FROM contact_requests ORDER BY received_at ASC'
+    );
+  }
+
+  async deleteContactRequest(ecdhPubHex) {
+    this._db.run('DELETE FROM contact_requests WHERE ecdh_pub_hex = ?', [ecdhPubHex]);
     await this._persist();
   }
 
