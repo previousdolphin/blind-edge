@@ -184,6 +184,7 @@
       /* 16px is iOS Safari's threshold: anything smaller makes the browser
          auto-zoom the page on focus and leave it scaled. Never go below. */
       font-size: 16px;
+      min-height: 44px; /* one control height everywhere (= HIG touch target) */
       outline: none;
       margin-bottom: 12px;
       transition: border-color 0.15s;
@@ -275,12 +276,14 @@
       cursor: not-allowed;
     }
 
-    /* Primary: full-width, high-contrast */
+    /* Primary: full-width, high-contrast — same 44px height as inputs */
     .btn-primary {
       background: #e8e8e8;
       color: #0a0a0a;
       width: 100%;
       margin-top: 4px;
+      font-size: 14px;
+      min-height: 44px;
     }
 
     .btn-primary:not(:disabled):hover {
@@ -291,11 +294,12 @@
       opacity: 0.75;
     }
 
-    /* Secondary: ghost */
+    /* Secondary: ghost — matches primary height when they sit in one row */
     .btn-secondary {
       background: transparent;
       border: 1px solid #2a2a2a;
       color: #888;
+      min-height: 44px;
     }
 
     .btn-secondary:not(:disabled):hover {
@@ -307,6 +311,7 @@
     .btn-danger {
       background: #ef4444;
       color: #fff;
+      min-height: 44px;
     }
 
     .btn-danger:not(:disabled):hover {
@@ -688,8 +693,10 @@
     .request-name {
       margin-bottom: 0 !important;
       padding: 5px 10px !important;
-      /* stays at the global 16px — smaller would trigger iOS focus zoom */
+      min-height: 38px !important; /* compact row; still ≥16px text for iOS */
     }
+
+    .btn-accept-request, .btn-decline-request { min-height: 38px; }
 
     .btn-accept-request {
       background: #4ade80;
@@ -827,6 +834,7 @@
       max-height: 120px;
       overflow-y: auto;
       line-height: 1.5;
+      padding-block: 9px; /* 24px line + 18 + 2 border = exactly 44px single-line */
     }
 
     #btn-send {
@@ -834,8 +842,12 @@
       background: #4ade80;
       color: #0a0a0a;
       font-weight: 600;
+      font-size: 14px;
       white-space: nowrap;
       flex-shrink: 0;
+      /* exactly one compose-row unit tall, hugging the input as it grows */
+      min-height: 44px;
+      padding: 0 20px;
     }
 
     #btn-send:not(:disabled):hover {
@@ -1392,6 +1404,15 @@
 
     .group-add-row select {
       flex: 1;
+      margin-bottom: 0;
+    }
+
+    /* btn-primary defaults to width:100% — inside this flex row that forces
+       an overflow; size to content instead */
+    .group-add-row .btn-primary {
+      width: auto;
+      margin-top: 0;
+      padding-inline: 18px;
     }
 
     /* ------------------------------------------------------------------ */
