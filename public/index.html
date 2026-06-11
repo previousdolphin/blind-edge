@@ -1808,8 +1808,8 @@
           <div class="auth-section-title">Set a local password</div>
           <div class="auth-section-desc">
             This password locks your keys on this device only. It is never sent
-            anywhere — there is no account and no password reset. If you forget
-            it, the 12 recovery words on the next screen are the only way back in.
+            anywhere — there is no account and no password reset. Your backup
+            options are on the next screen.
           </div>
 
           <input
@@ -1832,28 +1832,31 @@
         </div>
       </div>
 
-      <!-- Seed backup sub-state (shown once, right after key generation) -->
+      <!-- Backup options sub-state (shown once, right after key generation) -->
       <div id="auth-seed-backup" class="hidden">
         <div class="auth-card">
           <div class="onboard-confirm">✓ Two keys were just created in your browser. Nothing was sent to any server.</div>
 
-          <div class="auth-section-title">Your 12 recovery words</div>
-
-          <div id="onboard-seed-grid" class="seed-grid"></div>
+          <div class="auth-section-title">Back up your identity</div>
 
           <div class="onboard-stakes">
-            These words <strong>are</strong> your identity. Anyone who has them can be you.
-            If you lose them and this device, the identity is gone — nobody can reset it,
-            because nobody else has it. Message history never leaves your devices either way,
-            so it can't be recovered from the relay. Write the words on paper, not in a screenshot.
+            If this device is lost with no backup, the identity is gone — nobody can
+            reset it, because nobody else has it. You have two ways back in:
           </div>
 
-          <label class="warning-confirm-row" for="onboard-seed-check" style="margin-bottom:12px">
-            <input type="checkbox" id="onboard-seed-check">
-            <span>I wrote them down. <strong>I understand there is no other way back in.</strong></span>
-          </label>
+          <div class="welcome-cards" style="margin-bottom:16px">
+            <div class="welcome-card">
+              <div class="welcome-card-title"><span class="dot"></span>Encrypted backup file — safest</div>
+              <div class="welcome-card-desc">A downloadable file sealed with your App Password — useless to anyone without it. Get it any time via <strong>ID → Export backup file</strong>, or right now below.</div>
+            </div>
+            <div class="welcome-card">
+              <div class="welcome-card-title"><span class="dot" style="background:#b8860b"></span>12 recovery words</div>
+              <div class="welcome-card-desc">They recreate your keys anywhere with no file and no password — which also means <strong>anyone who sees them can be you</strong>. We don't display them here (screens get glanced at and screenshotted). View them in private via <strong>ID → Recovery words</strong>.</div>
+            </div>
+          </div>
 
-          <button id="btn-onboard-continue" class="btn-primary" disabled>Continue</button>
+          <button id="btn-onboard-export" class="btn-primary">Download encrypted backup now</button>
+          <button id="btn-onboard-continue" class="btn-secondary" style="width:100%;margin-top:8px">Continue — I'll back up later</button>
 
           <div class="or-divider" style="margin-top:14px">or</div>
 

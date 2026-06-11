@@ -14,8 +14,8 @@
 ## Try it — 60 seconds, two phones
 
 1. Open [blind-edge.pages.dev](https://blind-edge.pages.dev) on both phones
-2. Tap **Create my identity** → set a local password → write down your 12 words (or skip — disposable identities are a feature)
-3. On the "You're ready" screen, have your friend **scan your QR with their camera app** — it opens B.E.Chat with your key filled in
+2. Tap **Create my identity** → set a local password → pick a backup: the **encrypted export file is safest** (sealed with your password), or skip entirely — disposable identities are a feature
+3. On the "You're ready" screen, have your friend **scan your QR with their camera app** — it opens B.E.Chat with your key filled in; their app introduces them and you just tap **Accept**
 4. Start messaging
 
 Not in the same room? Tap **+ Add → Share code**, get a 6-letter code, and say it out loud over a call. It works for 10 minutes and the relay only ever sees its hash.
@@ -56,9 +56,9 @@ The relay is a **blind mailbox**. It accepts ciphertext addressed to a key hash 
 
 This is the part most apps get wrong, so here it is plainly:
 
-- **Your 12 words are your identity.** Every new identity is derived from fresh BIP39 entropy. Restoring the words on any device reproduces the *exact same keys and address* — contacts can still reach you. View them any time via **ID → Recovery words** (they're stored encrypted inside your password-protected vault).
-- **Message history never leaves your devices.** That's the point: there is no server copy to recover — for you *or* for an attacker. Lose the device without a backup and the history is gone; the identity survives via the words.
-- **The JSON export** (**ID → Export backup file**) contains your encrypted keys only — not contacts, not messages. It's a second recovery path that also needs your App Password.
+- **The encrypted export is the safest backup** (**ID → Export backup file**, offered during onboarding too). It contains your keys sealed under your App Password — useless to anyone without it, so it survives being stored somewhere imperfect. It holds keys only — not contacts, not messages.
+- **Your 12 words are the password-free fallback.** Every identity is derived from fresh BIP39 entropy; restoring the words on any device reproduces the *exact same keys and address* — contacts can still reach you. The flip side: anyone who sees them can be you, so they're never displayed during onboarding — view them in private, behind an explicit two-step reveal, via **ID → Recovery words** (at rest they live encrypted inside the vault).
+- **Message history never leaves your devices.** That's the point: there is no server copy to recover — for you *or* for an attacker. Lose the device without a backup and the history is gone; the identity survives via the export or the words.
 - **No words, no export, lost device → identity is gone permanently.** Nobody can reset it, because nobody else has it.
 - **Burner mode is a feature.** Skip the backup, use an identity for a session, then **Menu → Delete this identity**. Fresh keys take five seconds — new address, clean slate. Old contacts can't reach the new you.
 

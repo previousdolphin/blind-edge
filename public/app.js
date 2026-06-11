@@ -175,7 +175,7 @@ async function doCreate() {
     $id('setup-password-confirm').value = '';
 
     _pendingOnboard = { identity: { ecdh, sign, migratedFromV1: false, entropyHex, entropyWasPlaintext: false }, masterKey, salt };
-    showSeedBackup(words);
+    showBackupOptions();
   } catch (e) {
     showErr('setup-error', 'Identity generation failed: ' + e.message);
   } finally {
@@ -183,22 +183,18 @@ async function doCreate() {
   }
 }
 
-// ─── Onboarding steps (seed backup → ready → boot) ───────────────────────────
+// ─── Onboarding steps (backup options → ready → boot) ────────────────────────
 
-function showSeedBackup(words) {
-  $id('onboard-seed-grid').innerHTML = words.map((w, i) =>
-    `<div class="seed-word"><span class="seed-num">${i + 1}</span><span class="seed-text">${esc(w)}</span></div>`
-  ).join('');
-  $id('onboard-seed-check').checked = false;
-  $id('btn-onboard-continue').disabled = true;
+// The 12 words are deliberately NOT shown here: an onboarding screen is the
+// most-watched, most-screenshotted moment of the app. The encrypted export is
+// recommended as the safer backup (sealed under the App Password); the words
+// stay available on demand, behind the two-step gate in ID → Recovery words.
+function showBackupOptions() {
   $id('burner-panel').classList.add('hidden');
   showAuthSub('seed-backup');
 }
 
 async function showReady() {
-  // Words are no longer needed in the DOM — clear them before moving on.
-  $id('onboard-seed-grid').innerHTML = '';
-
   const { identity } = _pendingOnboard;
   const ecdhPubHex = await SecurityManager.exportPublicKeyHex(identity.ecdh.publicKey);
   const signPubHex = await SecurityManager.exportSignPublicKeyHex(identity.sign.publicKey);
@@ -1657,9 +1653,7 @@ function wireEvents() {
   $id('btn-welcome-create').addEventListener('click', () => showAuthSub('setup'));
   $id('link-welcome-import').addEventListener('click', () => showAuthSub('import'));
   $id('link-about-welcome').addEventListener('click', openAboutModal);
-  $id('onboard-seed-check').addEventListener('change', e => {
-    $id('btn-onboard-continue').disabled = !e.target.checked;
-  });
+  $id('btn-onboard-export').addEventListener('click', openExportWarning);
   $id('btn-onboard-continue').addEventListener('click', showReady);
   $id('btn-onboard-skip').addEventListener('click', () => {
     $id('burner-panel').classList.toggle('hidden');
