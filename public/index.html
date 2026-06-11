@@ -390,6 +390,13 @@
     /* ------------------------------------------------------------------ */
     /* Panels                                                               */
     /* ------------------------------------------------------------------ */
+    #panels {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
     .panel {
       flex: 1;
       overflow-y: auto;
@@ -400,6 +407,82 @@
 
     .panel.hidden {
       display: none;
+    }
+
+    /* Desktop-only placeholder (shown when no chat is open, wide layout) */
+    #chat-placeholder {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #333;
+      font-size: 14px;
+      gap: 6px;
+      text-align: center;
+    }
+
+    #chat-placeholder p:first-child {
+      color: #555;
+      font-weight: 500;
+      font-size: 15px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Desktop: two-pane layout                                             */
+    /* ------------------------------------------------------------------ */
+    @media (min-width: 900px) {
+      #app {
+        max-width: 1080px;
+      }
+
+      #panels {
+        flex-direction: row;
+      }
+
+      /* Contacts stay visible alongside the chat; the .hidden toggle that
+         drives the mobile single-pane flow is overridden here (id selector
+         outranks the .hidden class, both !important). */
+      #panel-contacts {
+        display: flex !important;
+        flex: none;
+        width: 340px;
+        border-right: 1px solid #1a1a1a;
+      }
+
+      #panel-chat {
+        flex: 1;
+      }
+
+      /* Placeholder fills the chat area until a conversation is opened */
+      #panel-chat.hidden ~ #chat-placeholder {
+        display: flex;
+      }
+
+      /* No "back" on desktop — the list never goes away */
+      #btn-back {
+        display: none !important;
+      }
+
+      /* Don't let bubbles stretch absurdly wide in the big pane */
+      .message {
+        max-width: min(78%, 560px);
+      }
+
+      /* A bit more breathing room for the modals on big screens */
+      .modal-box {
+        max-width: 420px;
+      }
+
+      .modal-box.about-box {
+        max-width: 480px;
+      }
+    }
+
+    /* Active conversation highlight (matters on desktop where both panes show) */
+    .contact-item.active {
+      background: #141414;
+      box-shadow: inset 2px 0 0 #4ade80;
     }
 
     .panel-header {
@@ -426,6 +509,19 @@
     #btn-add-contact:not(:disabled):hover {
       border-color: #4ade8055;
       background: #4ade800a;
+    }
+
+    #btn-create-group {
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #5b8dee;
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+
+    #btn-create-group:not(:disabled):hover {
+      border-color: #5b8dee55;
+      background: #5b8dee0a;
     }
 
     /* ------------------------------------------------------------------ */
@@ -1821,38 +1917,46 @@
         </div>
       </header>
 
-      <!-- Contact List Panel -->
-      <div id="panel-contacts" class="panel active">
-        <div class="panel-header">
-          <span style="display:flex;align-items:center;gap:10px">Conversations
-            <span id="relay-status" title="Connection to the message relay"><span class="dot"></span><span id="relay-status-text"></span></span>
-          </span>
-          <div style="display:flex;gap:6px">
-            <button id="btn-create-group">+ Group</button>
-            <button id="btn-add-contact">+ Add</button>
+      <div id="panels">
+        <!-- Contact List Panel -->
+        <div id="panel-contacts" class="panel active">
+          <div class="panel-header">
+            <span style="display:flex;align-items:center;gap:10px">Conversations
+              <span id="relay-status" title="Connection to the message relay"><span class="dot"></span><span id="relay-status-text"></span></span>
+            </span>
+            <div style="display:flex;gap:6px">
+              <button id="btn-create-group">+ Group</button>
+              <button id="btn-add-contact">+ Add</button>
+            </div>
+          </div>
+          <div id="contact-list"></div>
+          <div id="contact-empty" class="empty-state hidden">
+            <p>No conversations yet.</p>
+            <p>Tap <strong>+ Add</strong> — show someone your QR code, or trade a 6-letter share code.</p>
           </div>
         </div>
-        <div id="contact-list"></div>
-        <div id="contact-empty" class="empty-state hidden">
-          <p>No conversations yet.</p>
-          <p>Tap <strong>+ Add</strong> — show someone your QR code, or trade a 6-letter share code.</p>
-        </div>
-      </div>
 
-      <!-- Chat Panel -->
-      <div id="panel-chat" class="panel hidden">
-        <div id="ttl-notice" class="hidden"></div>
-        <div id="message-list"></div>
-        <div id="compose">
-          <textarea
-            id="compose-input"
-            placeholder="Message..."
-            rows="1"
-            autocomplete="off"
-            autocorrect="on"
-            spellcheck="true"
-          ></textarea>
-          <button id="btn-send">Send</button>
+        <!-- Chat Panel -->
+        <div id="panel-chat" class="panel hidden">
+          <div id="ttl-notice" class="hidden"></div>
+          <div id="message-list"></div>
+          <div id="compose">
+            <textarea
+              id="compose-input"
+              placeholder="Message..."
+              rows="1"
+              autocomplete="off"
+              autocorrect="on"
+              spellcheck="true"
+            ></textarea>
+            <button id="btn-send">Send</button>
+          </div>
+        </div>
+
+        <!-- Desktop-only placeholder when no chat is open -->
+        <div id="chat-placeholder">
+          <p>Select a conversation</p>
+          <p>or tap <strong>+ Add</strong> to connect with someone.</p>
         </div>
       </div>
 

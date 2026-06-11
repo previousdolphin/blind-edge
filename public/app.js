@@ -376,7 +376,7 @@ function renderContactList() {
     if (item._type === 'contact') {
       const c = item;
       return `
-        <div class="contact-item" data-id="${c.id}">
+        <div class="contact-item${c.id === state.activeContactId ? ' active' : ''}" data-id="${c.id}">
           <div class="contact-avatar">${generateIdenticon(c.pubKeyHex, 36)}</div>
           <div class="contact-info">
             <div class="contact-name">${esc(c.name)}${c.legacy ? ' <span class="legacy-badge" title="This contact was added without a signing key, so messages from them can\'t be authenticity-verified. Ask them to re-share their full key.">no signatures</span>' : ''}</div>
@@ -390,7 +390,7 @@ function renderContactList() {
     } else {
       const g = item;
       return `
-        <div class="contact-item group-item" data-group-id="${g.id}">
+        <div class="contact-item group-item${g.id === state.activeGroupId ? ' active' : ''}" data-group-id="${g.id}">
           <div class="contact-avatar">${generateIdenticon(g.groupHash, 36)}</div>
           <div class="contact-info">
             <div class="contact-name">${esc(g.name)} <span class="group-badge">group</span></div>
@@ -429,8 +429,20 @@ function formatTTL(seconds) {
   return `${seconds / 86400}d`;
 }
 
+// Reflect the open conversation in the list (visible alongside the chat on desktop)
+function markActiveInList() {
+  document.querySelectorAll('#contact-list .contact-item').forEach(el => {
+    const isActive = el.classList.contains('group-item')
+      ? parseInt(el.dataset.groupId, 10) === state.activeGroupId
+      : parseInt(el.dataset.id, 10) === state.activeContactId;
+    el.classList.toggle('active', isActive);
+  });
+}
+
 async function openChat(contactId) {
   state.activeContactId = contactId;
+  state.activeGroupId = null;
+  markActiveInList();
   const contact = state.contacts.find(c => c.id === contactId);
 
   // Prune expired messages for this contact before rendering
@@ -441,6 +453,7 @@ async function openChat(contactId) {
   $id('panel-contacts').classList.add('hidden');
   $id('panel-chat').classList.remove('hidden');
   $id('btn-back').classList.remove('hidden');
+  $id('btn-group-members').classList.add('hidden'); // direct group→1:1 switch on desktop
   $id('app-title').textContent = contact ? contact.name : 'Chat';
 
   // TTL button
@@ -486,6 +499,7 @@ function goBack() {
 async function openGroupChat(groupId) {
   state.activeGroupId = groupId;
   state.activeContactId = null;
+  markActiveInList();
   const group = state.groups.find(g => g.id === groupId);
 
   $id('panel-contacts').classList.add('hidden');

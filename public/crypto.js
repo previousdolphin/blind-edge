@@ -19,21 +19,75 @@
 // after encryption, but the recipient's long-term key still decrypts.
 import { hexToBytes, bytesToHex } from './hex.js';
 
-// PKCS8 DER prefix for a P-256 private key (RFC 5958 / SEC 1).
-// Structure: PrivateKeyInfo { version=0, ecPublicKey OID, P-256 OID, ECPrivateKey { version=1, privateKey=<32 bytes> } }
-// The 32-byte private scalar is appended directly after this prefix.
-const P256_PKCS8_PREFIX = new Uint8Array([
-  0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07,
-  0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
-  0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04,
-  0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20,
-]);
+// ─── Minimal P-256 point math (BigInt) ────────────────────────────────────────
+// Needed only to turn a deterministic private scalar into its public point.
+// WebKit (iOS/macOS Safari) throws DataError on importKey('pkcs8', …) when the
+// EC private key has no embedded public point, and a private JWK requires x/y
+// — so we compute scalar·G ourselves and import via JWK, which every browser
+// accepts. Used once per identity creation/restore (not per message), and only
+// on the user's own fresh key, so non-constant-time double-and-add is fine.
+const P256 = {
+  p:  0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn,
+  n:  0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n,
+  gx: 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n,
+  gy: 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n,
+};
 
-function buildP256PKCS8(scalar32) {
-  const der = new Uint8Array(P256_PKCS8_PREFIX.length + 32);
-  der.set(P256_PKCS8_PREFIX);
-  der.set(scalar32.slice(0, 32), P256_PKCS8_PREFIX.length);
-  return der.buffer;
+function _mod(a, m) { const r = a % m; return r < 0n ? r + m : r; }
+
+function _inv(a, m) {
+  let [oldR, r] = [_mod(a, m), m];
+  let [oldS, s] = [1n, 0n];
+  while (r !== 0n) {
+    const q = oldR / r;
+    [oldR, r] = [r, oldR - q * r];
+    [oldS, s] = [s, oldS - q * s];
+  }
+  return _mod(oldS, m);
+}
+
+// Affine point add/double on y² = x³ - 3x + b over GF(p). null = point at infinity.
+function _pointAdd(p1, p2) {
+  if (!p1) return p2;
+  if (!p2) return p1;
+  const { p } = P256;
+  const [x1, y1] = p1, [x2, y2] = p2;
+  let l;
+  if (x1 === x2) {
+    if (_mod(y1 + y2, p) === 0n) return null;
+    l = _mod((3n * x1 * x1 - 3n) * _inv(2n * y1, p), p);
+  } else {
+    l = _mod((y2 - y1) * _inv(x2 - x1, p), p);
+  }
+  const x3 = _mod(l * l - x1 - x2, p);
+  return [x3, _mod(l * (x1 - x3) - y1, p)];
+}
+
+function _scalarMultG(k) {
+  let result = null;
+  let addend = [P256.gx, P256.gy];
+  while (k > 0n) {
+    if (k & 1n) result = _pointAdd(result, addend);
+    addend = _pointAdd(addend, addend);
+    k >>= 1n;
+  }
+  return result;
+}
+
+function _bigIntTo32(v) {
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--) { out[i] = Number(v & 0xffn); v >>= 8n; }
+  return out;
+}
+
+function _bytesToBigInt(bytes) {
+  let v = 0n;
+  for (const b of bytes) v = (v << 8n) | BigInt(b);
+  return v;
+}
+
+function _b64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 export class SecurityManager {
@@ -331,8 +385,12 @@ export class SecurityManager {
 
   // Derive a deterministic identity from a BIP39 seed (64 bytes from mnemonicToSeed).
   // HKDF expands the seed into two distinct 32-byte scalars, one per keypair.
-  // PKCS8 DER import lets Web Crypto compute public key coordinates internally;
-  // we then extract x/y from the JWK export to build the usable public key object.
+  // We compute the public point (scalar·G) with the BigInt math above and
+  // import both halves as JWK. (An earlier version imported the bare scalar
+  // as PKCS#8 and let Web Crypto derive the public key — Chrome and Firefox
+  // accept that, but WebKit throws DataError, which broke identity creation
+  // on iPhone/iPad/Safari. JWK with explicit x/y works everywhere and yields
+  // byte-identical keys, so existing addresses are preserved.)
   static async deriveIdentityFromSeed(seed64) {
     const hkdfKey = await crypto.subtle.importKey('raw', seed64, 'HKDF', false, ['deriveBits']);
 
@@ -341,14 +399,20 @@ export class SecurityManager {
         { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode(info) },
         hkdfKey, 256
       );
+      const d = _mod(_bytesToBigInt(new Uint8Array(bits)), P256.n);
+      if (d === 0n) throw new Error('Derived scalar is zero — re-derive with different entropy');
+      const point = _scalarMultG(d);
+      const base = {
+        kty: 'EC', crv: 'P-256',
+        x: _b64url(_bigIntTo32(point[0])),
+        y: _b64url(_bigIntTo32(point[1])),
+      };
       const privateKey = await crypto.subtle.importKey(
-        'pkcs8', buildP256PKCS8(new Uint8Array(bits)),
+        'jwk', { ...base, d: _b64url(_bigIntTo32(d)) },
         { name, namedCurve: 'P-256' }, true, usages
       );
-      // Export JWK to get x/y (Web Crypto computed them from the scalar)
-      const jwk = await crypto.subtle.exportKey('jwk', privateKey);
       const publicKey = await crypto.subtle.importKey(
-        'jwk', { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
+        'jwk', base,
         { name, namedCurve: 'P-256' }, true, verifyUsage
       );
       return { publicKey, privateKey };

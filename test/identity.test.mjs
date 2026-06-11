@@ -90,6 +90,54 @@ test('password-era bundle without any entropy unlocks cleanly with entropyHex nu
   assert.equal(imported.entropyWasPlaintext, false);
 });
 
+test('JWK derivation matches the legacy PKCS8 path byte-for-byte (address preservation)', async () => {
+  // The original deriveIdentityFromSeed imported the bare scalar as PKCS#8
+  // and let Web Crypto compute the public point. That broke on WebKit, so the
+  // implementation now computes scalar·G itself and imports via JWK. This test
+  // re-runs the legacy PKCS8 path (node supports it) and asserts both paths
+  // produce the same public keys — i.e. no existing identity changes address.
+  const P256_PKCS8_PREFIX = new Uint8Array([
+    0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07,
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04,
+    0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20,
+  ]);
+
+  for (let trial = 0; trial < 5; trial++) {
+    const entropy = crypto.getRandomValues(new Uint8Array(16));
+    const seed = await mnemonicToSeed(await entropyToMnemonic(entropy), '');
+
+    // current implementation
+    const current = await SecurityManager.deriveIdentityFromSeed(seed);
+    const currentEcdhPub = await SecurityManager.exportPublicKeyHex(current.ecdh.publicKey);
+    const currentSignPub = await SecurityManager.exportSignPublicKeyHex(current.sign.publicKey);
+
+    // legacy PKCS8 path, reproduced independently
+    const hkdfKey = await crypto.subtle.importKey('raw', seed, 'HKDF', false, ['deriveBits']);
+    async function legacyPub(info, name) {
+      const bits = await crypto.subtle.deriveBits(
+        { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode(info) },
+        hkdfKey, 256
+      );
+      const der = new Uint8Array(P256_PKCS8_PREFIX.length + 32);
+      der.set(P256_PKCS8_PREFIX);
+      der.set(new Uint8Array(bits), P256_PKCS8_PREFIX.length);
+      const priv = await crypto.subtle.importKey(
+        'pkcs8', der.buffer, { name, namedCurve: 'P-256' }, true,
+        name === 'ECDH' ? ['deriveBits'] : ['sign']
+      );
+      const jwk = await crypto.subtle.exportKey('jwk', priv);
+      const pub = await crypto.subtle.importKey(
+        'jwk', { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
+        { name, namedCurve: 'P-256' }, true, name === 'ECDH' ? [] : ['verify']
+      );
+      return bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pub)));
+    }
+    assert.equal(currentEcdhPub, await legacyPub('blind-edge-ecdh-v2', 'ECDH'), `ECDH pub mismatch (trial ${trial})`);
+    assert.equal(currentSignPub, await legacyPub('blind-edge-ecdsa-v2', 'ECDSA'), `ECDSA pub mismatch (trial ${trial})`);
+  }
+});
+
 test('restored identity decrypts a message sent to the original', async () => {
   const entropy = crypto.getRandomValues(new Uint8Array(16));
   const words = await entropyToMnemonic(entropy);
