@@ -215,6 +215,7 @@ export class StorageManager {
         c.pub_key_hex as pubKeyHex,
         c.sign_pub_key_hex as signPubKeyHex,
         c.legacy,
+        c.ttl_seconds,
         c.added_at as addedAt,
         (SELECT plaintext FROM messages WHERE contact_id = c.id ORDER BY ts DESC LIMIT 1) as lastMessage,
         (SELECT ts FROM messages WHERE contact_id = c.id ORDER BY ts DESC LIMIT 1) as lastTs,
@@ -225,7 +226,18 @@ export class StorageManager {
   }
 
   async getContact(id) {
-    const rows = this._query('SELECT * FROM contacts WHERE id = ?', [id]);
+    // Same camelCase shape as getContacts — callers (e.g. the pending-message
+    // retry in runSync) read contact.pubKeyHex, and the raw snake_case row
+    // silently broke them.
+    const rows = this._query(
+      `SELECT id, name,
+              pub_key_hex as pubKeyHex,
+              sign_pub_key_hex as signPubKeyHex,
+              legacy, ttl_seconds,
+              added_at as addedAt
+       FROM contacts WHERE id = ?`,
+      [id]
+    );
     return rows.length ? rows[0] : null;
   }
 

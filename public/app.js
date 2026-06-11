@@ -723,7 +723,7 @@ async function runSync(serverUrl) {
         try {
           const parsed = JSON.parse(plaintext);
           if (parsed?.type === 'group-invite') {
-            await handleGroupInvite(parsed);
+            await handleGroupInvite(parsed, env.createdAt);
             isSystem = true;
           } else if (parsed?.type === 'group-key-update') {
             await handleGroupKeyUpdate(parsed);
@@ -774,29 +774,41 @@ async function syncGroups(serverUrl) {
       if (!res.ok) continue;
       const { envelopes } = await res.json();
       let maxTs = group.lastSync;
+      // If an envelope fails to decrypt, the likeliest cause is a key rotation
+      // whose key-update hasn't reached us yet (it travels on the 1:1 channel).
+      // Stop advancing the cursor at the first failure so the envelope is
+      // re-fetched next tick and decrypted once the new key lands — instead of
+      // being skipped forever. Later envelopes in the batch are still processed
+      // (remote_id dedup makes the re-fetch harmless).
+      let stalled = false;
       const sorted = envelopes.slice().sort((a, b) => a.createdAt - b.createdAt);
       for (const env of sorted) {
-        if (env.senderHash === state.keyHash) { if (env.createdAt > maxTs) maxTs = env.createdAt; continue; }
-        try {
-          const payload = await SecurityManager.groupDecrypt(env.ciphertext, env.iv, group.groupKey);
-          if (!payload || payload.type !== 'group-msg' || payload.group_id !== group.groupId) continue;
-
-          const members = await state.storage.getGroupMembers(group.id);
-          const senderMember = members.find(m => m.keyHash === payload.sender_hash);
-          let sigValid = false;
-          if (senderMember?.signPubHex) {
-            try {
-              const pub = await SecurityManager.importSignPublicKeyHex(senderMember.signPubHex);
-              sigValid = await SecurityManager.groupVerifySig(payload, env.iv, pub);
-            } catch (_) {}
-          }
-
-          const saved = await state.storage.addGroupMessage(
-            group.id, payload.sender_hash, payload.text, sigValid, payload.ts, String(env.id)
-          );
-          if (saved > 0) gotNew = true;
-        } catch (_) {}
-        if (env.createdAt > maxTs) maxTs = env.createdAt;
+        let handled = false;
+        if (env.senderHash === state.keyHash) {
+          handled = true; // our own envelope — nothing to decrypt
+        } else {
+          try {
+            const payload = await SecurityManager.groupDecrypt(env.ciphertext, env.iv, group.groupKey);
+            if (payload && payload.type === 'group-msg' && payload.group_id === group.groupId) {
+              const members = await state.storage.getGroupMembers(group.id);
+              const senderMember = members.find(m => m.keyHash === payload.sender_hash);
+              let sigValid = false;
+              if (senderMember?.signPubHex) {
+                try {
+                  const pub = await SecurityManager.importSignPublicKeyHex(senderMember.signPubHex);
+                  sigValid = await SecurityManager.groupVerifySig(payload, env.iv, pub);
+                } catch (_) {}
+              }
+              const saved = await state.storage.addGroupMessage(
+                group.id, payload.sender_hash, payload.text, sigValid, payload.ts, String(env.id)
+              );
+              if (saved > 0) gotNew = true;
+              handled = true;
+            }
+          } catch (_) {}
+        }
+        if (!handled) stalled = true;
+        if (!stalled && env.createdAt > maxTs) maxTs = env.createdAt;
       }
       if (maxTs > group.lastSync) await state.storage.setGroupSyncCursor(group.id, maxTs);
     } catch (_) {}
@@ -806,21 +818,48 @@ async function syncGroups(serverUrl) {
 
 // ─── Group management ─────────────────────────────────────────────────────────
 
-async function handleGroupInvite(payload) {
+// Map invite/update member entries to local display names where we know them.
+function _mapMemberNames(members) {
+  return (members || []).map(m => {
+    const contact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+    return {
+      name: (m.ecdhPubHex === state.ecdhPubKeyHex) ? 'You' : (contact?.name || m.name || m.ecdhPubHex.slice(0, 8) + '…'),
+      ecdhPubHex: m.ecdhPubHex,
+      signPubHex: m.signPubHex || null,
+    };
+  });
+}
+
+async function handleGroupInvite(payload, inviteCreatedAt) {
   const existing = await state.storage.getGroupByIdHex(payload.group_id);
-  if (existing) return; // already have this group
+  if (existing) {
+    // Re-invite for a group we already track — happens when we're re-added
+    // after a removal, or when the admin retries a failed add to heal the key.
+    // Adopt the fresh key + roster, and jump the cursor past the stretch we
+    // couldn't decrypt anyway (we didn't have the keys used during it).
+    await state.storage.updateGroupKey(payload.group_id, payload.group_key, _mapMemberNames(payload.members));
+    const cursor = Math.max(existing.lastSync || 0, (inviteCreatedAt || Date.now()) - 1);
+    await state.storage.setGroupSyncCursor(existing.id, cursor);
+    if (state.activeGroupId === existing.id) {
+      state.activeGroupMembers = await state.storage.getGroupMembers(existing.id);
+    }
+    await refreshContacts();
+    return;
+  }
 
   const groupDbId = await state.storage.createGroup(
     payload.group_name, payload.group_id, payload.group_hash, payload.group_key, false
   );
-  // Set sync cursor to now so we only receive new messages
-  await state.storage.setGroupSyncCursor(groupDbId, Date.now());
+  // Start the group cursor at the invite envelope's RELAY timestamp, not our
+  // local processing time: anything posted to the group after the invite was
+  // sent uses the key we just received, and must not be skipped just because
+  // our sync ran a few seconds late. (Pre-invite envelopes use older keys and
+  // stay excluded.) Both timestamps come from the same relay clock, so there
+  // is no cross-device skew.
+  await state.storage.setGroupSyncCursor(groupDbId, Math.max(0, (inviteCreatedAt || Date.now()) - 1));
 
-  for (const m of payload.members) {
-    // Prefer local contact name if we know this key
-    const contact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
-    const name = (m.ecdhPubHex === state.ecdhPubKeyHex) ? 'You' : (contact?.name || m.name || m.ecdhPubHex.slice(0, 8) + '…');
-    await state.storage.addGroupMember(groupDbId, name, m.ecdhPubHex, m.signPubHex || null);
+  for (const m of _mapMemberNames(payload.members)) {
+    await state.storage.addGroupMember(groupDbId, m.name, m.ecdhPubHex, m.signPubHex);
   }
 
   await refreshContacts();
@@ -830,36 +869,31 @@ async function handleGroupInvite(payload) {
 async function handleGroupKeyUpdate(payload) {
   const group = await state.storage.getGroupByIdHex(payload.group_id);
   if (!group) return;
-  const memberObjs = (payload.members || []).map(m => {
-    const contact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
-    return {
-      name: (m.ecdhPubHex === state.ecdhPubKeyHex) ? 'You' : (contact?.name || m.name || m.ecdhPubHex.slice(0, 8) + '…'),
-      ecdhPubHex: m.ecdhPubHex,
-      signPubHex: m.signPubHex || null,
-    };
-  });
-  await state.storage.updateGroupKey(payload.group_id, payload.group_key, memberObjs);
+  await state.storage.updateGroupKey(payload.group_id, payload.group_key, _mapMemberNames(payload.members));
   if (state.activeGroupId === group.id) {
     state.activeGroupMembers = await state.storage.getGroupMembers(group.id);
   }
 }
 
+// Deliver a group control message (invite / key-update) over the 1:1 channel.
+// THROWS on any failure — callers must treat key distribution as transactional:
+// a silently-dropped key-update leaves a member permanently unable to decrypt.
 async function _sendGroupSystemMessage(contact, payload) {
   const serverUrl = (await state.storage.getSetting('serverUrl')) || '';
-  if (!serverUrl) return;
+  if (!serverUrl) throw new Error('no relay configured');
   const recipientPubKey = await SecurityManager.importPublicKeyHex(contact.pubKeyHex);
   const counter = await state.storage.incrementSentCounter(contact.id);
-  const senderSignPub = contact.signPubKeyHex ? await SecurityManager.importSignPublicKeyHex(contact.signPubKeyHex) : null;
   const inner = await SecurityManager.encryptMessageEphemeral(
     JSON.stringify(payload), counter, recipientPubKey, contact.pubKeyHex, state.signKeypair.privateKey
   );
   const outerCiphertext = encodeInnerEnvelope(inner);
   const recipientHash = await SecurityManager.getKeyHash(recipientPubKey);
-  await fetch(`${serverUrl}/api/send`, {
+  const res = await fetch(`${serverUrl}/api/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recipient_hash: recipientHash, sender_hash: state.keyHash, ciphertext: outerCiphertext, iv: OUTER_IV_PLACEHOLDER }),
   });
+  if (!res.ok) throw new Error(`relay rejected (${res.status})`);
 }
 
 function openCreateGroupModal() {
@@ -894,20 +928,15 @@ async function doCreateGroup() {
     const hashBuf = await crypto.subtle.digest('SHA-256', groupIdBytes);
     const groupHashHex = bytesToHex(new Uint8Array(hashBuf));
 
-    const groupDbId = await state.storage.createGroup(name, groupIdHex, groupHashHex, groupKeyHex, true);
-    // Add myself
-    await state.storage.addGroupMember(groupDbId, 'You', state.ecdhPubKeyHex, state.signPubKeyHex);
-
-    // Build full member list (including myself)
     const invitedContacts = checked.map(el => state.contacts.find(c => c.id === parseInt(el.value, 10))).filter(Boolean);
-    for (const c of invitedContacts) {
-      await state.storage.addGroupMember(groupDbId, c.name, c.pubKeyHex, c.signPubKeyHex || null);
-    }
+    const memberPayload = [
+      { name: 'You', ecdhPubHex: state.ecdhPubKeyHex, signPubHex: state.signPubKeyHex },
+      ...invitedContacts.map(c => ({ name: c.name, ecdhPubHex: c.pubKeyHex, signPubHex: c.signPubKeyHex || null })),
+    ];
 
-    const allMembers = await state.storage.getGroupMembers(groupDbId);
-    const memberPayload = allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
-
-    // Send invites
+    // Deliver every invite BEFORE storing anything locally — if the relay is
+    // unreachable, the group simply isn't created, instead of existing only
+    // on this device with members who never heard about it.
     for (const c of invitedContacts) {
       await _sendGroupSystemMessage(c, {
         type: 'group-invite', group_id: groupIdHex, group_hash: groupHashHex,
@@ -915,18 +944,24 @@ async function doCreateGroup() {
       });
     }
 
+    // All invites accepted by the relay — commit locally
+    const groupDbId = await state.storage.createGroup(name, groupIdHex, groupHashHex, groupKeyHex, true);
+    await state.storage.addGroupMember(groupDbId, 'You', state.ecdhPubKeyHex, state.signPubKeyHex);
+    for (const c of invitedContacts) {
+      await state.storage.addGroupMember(groupDbId, c.name, c.pubKeyHex, c.signPubKeyHex || null);
+    }
+
     closeModal('modal-create-group');
     await refreshContacts();
-    showToast(`Group "${name}" created`, 'success');
+    showToast(`Group "${name}" created — invites delivered`, 'success');
   } catch (e) {
-    showErr('create-group-error', 'Failed: ' + e.message);
+    showErr('create-group-error', `Couldn't reach the relay (${e.message}). Nothing was created — try again.`);
   } finally {
     setLoading(btn, false, 'Create Group');
   }
 }
 
 async function openGroupMembersModal(groupDbId) {
-  const group = state.groups.find(g => g.id === groupDbId) || await state.storage.getGroupByIdHex('');
   const members = await state.storage.getGroupMembers(groupDbId);
   const g = state.groups.find(g => g.id === groupDbId);
 
@@ -988,27 +1023,25 @@ async function doAddGroupMember(groupDbId) {
     const group = state.groups.find(g => g.id === groupDbId);
     if (!group) return;
 
-    // Rotate key
-    const newKeyBytes = crypto.getRandomValues(new Uint8Array(32));
-    const newKeyHex = bytesToHex(newKeyBytes);
+    // Rotate the group key for the new roster
+    const newKeyHex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
 
-    // Add new member to local DB
-    await state.storage.addGroupMember(groupDbId, contact.name, contact.pubKeyHex, contact.signPubKeyHex || null);
-    const allMembers = await state.storage.getGroupMembers(groupDbId);
-    const memberPayload = allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
+    const existing = await state.storage.getGroupMembers(groupDbId);
+    const memberPayload = [
+      ...existing.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex })),
+      { name: contact.name, ecdhPubHex: contact.pubKeyHex, signPubHex: contact.signPubKeyHex || null },
+    ];
 
-    // Update key locally
-    await state.storage.updateGroupKey(group.groupId, newKeyHex, allMembers.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex })));
-
-    // Send invite to new member
+    // Deliver everything BEFORE committing locally. Invite first: if it fails,
+    // no key-update has gone out and nothing changed anywhere. If a key-update
+    // fails partway, retrying the add rotates a fresh key and re-syncs everyone.
     await _sendGroupSystemMessage(contact, {
       type: 'group-invite', group_id: group.groupId, group_hash: group.groupHash,
       group_key: newKeyHex, group_name: group.name, i_am_admin: false, members: memberPayload,
     });
 
-    // Send key-update to existing members (everyone except the new member)
-    for (const m of allMembers) {
-      if (m.ecdhPubHex === state.ecdhPubKeyHex || m.ecdhPubHex === contact.pubKeyHex) continue;
+    for (const m of existing) {
+      if (m.ecdhPubHex === state.ecdhPubKeyHex) continue;
       const existingContact = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
       if (existingContact) {
         await _sendGroupSystemMessage(existingContact, {
@@ -1017,11 +1050,14 @@ async function doAddGroupMember(groupDbId) {
       }
     }
 
+    // All deliveries accepted — commit the new roster + key locally
+    await state.storage.updateGroupKey(group.groupId, newKeyHex, memberPayload);
+
     await refreshContacts();
-    showToast(`${contact.name} added to group`, 'success');
+    showToast(`${contact.name} added — group key rotated`, 'success');
     await openGroupMembersModal(groupDbId);
   } catch (e) {
-    showToast('Failed to add member: ' + e.message, 'error');
+    showToast(`Couldn't add ${contact.name}: ${e.message}. Try again — retrying re-syncs the key.`, 'error');
   } finally {
     setLoading(btn, false, 'Add');
   }
@@ -1031,30 +1067,31 @@ async function doRemoveGroupMember(groupDbId, ecdhPubHex) {
   const group = state.groups.find(g => g.id === groupDbId);
   if (!group) return;
 
-  const newKeyBytes = crypto.getRandomValues(new Uint8Array(32));
-  const newKeyHex = bytesToHex(newKeyBytes);
+  const newKeyHex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
 
-  // Remove from DB and get remaining members
-  await state.storage.removeGroupMember(groupDbId, ecdhPubHex);
-  const remaining = await state.storage.getGroupMembers(groupDbId);
+  const members = await state.storage.getGroupMembers(groupDbId);
+  const remaining = members.filter(m => m.ecdhPubHex !== ecdhPubHex);
   const memberPayload = remaining.map(m => ({ name: m.name, ecdhPubHex: m.ecdhPubHex, signPubHex: m.signPubHex }));
 
-  // Update key locally
-  await state.storage.updateGroupKey(group.groupId, newKeyHex, memberPayload);
-
-  // Send key-update to remaining members (not myself)
-  for (const m of remaining) {
-    if (m.ecdhPubHex === state.ecdhPubKeyHex) continue;
-    const c = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
-    if (c) {
-      await _sendGroupSystemMessage(c, {
-        type: 'group-key-update', group_id: group.groupId, group_key: newKeyHex, members: memberPayload,
-      });
+  try {
+    // Deliver the rotated key to every remaining member BEFORE committing —
+    // if the relay is down, the member simply isn't removed yet.
+    for (const m of remaining) {
+      if (m.ecdhPubHex === state.ecdhPubKeyHex) continue;
+      const c = state.contacts.find(c => c.pubKeyHex === m.ecdhPubHex);
+      if (c) {
+        await _sendGroupSystemMessage(c, {
+          type: 'group-key-update', group_id: group.groupId, group_key: newKeyHex, members: memberPayload,
+        });
+      }
     }
-  }
 
-  await refreshContacts();
-  showToast('Member removed and key rotated', 'success');
+    await state.storage.updateGroupKey(group.groupId, newKeyHex, memberPayload);
+    await refreshContacts();
+    showToast('Member removed and key rotated', 'success');
+  } catch (e) {
+    showToast(`Couldn't remove member: ${e.message}. Nothing changed — try again.`, 'error');
+  }
 }
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
