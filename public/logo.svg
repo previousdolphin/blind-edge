@@ -32,33 +32,37 @@
   <rect width="680" height="160" rx="18" fill="#0a0a0a"/>
   <rect x="0.75" y="0.75" width="678.5" height="158.5" rx="17.25" stroke="#1e1e1e" stroke-width="1.5" fill="none"/>
 
-  <!-- ── Figure ───────────────────────────────── -->
-  <!-- Shoulders -->
-  <path d="M 12 155 Q 38 134 76 130 Q 114 134 140 155" stroke="#222" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- ── Blinded ninja ───────────────────────────── -->
+  <!-- Shoulders / gi -->
+  <path d="M 10 156 Q 32 127 76 123 Q 120 127 142 156" fill="#0d0d0d" stroke="#232323" stroke-width="1.5"/>
+  <!-- Gi collar crossover -->
+  <path d="M 58 128 L 76 147 L 94 128" stroke="#2a2a2a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   <!-- Neck -->
-  <rect x="67" y="113" width="18" height="19" rx="5" fill="#111" stroke="#222" stroke-width="1.5"/>
-  <!-- Left ear -->
-  <ellipse cx="33" cy="72" rx="7" ry="12" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
-  <!-- Right ear -->
-  <ellipse cx="119" cy="72" rx="7" ry="12" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
-  <!-- Head -->
-  <circle cx="76" cy="72" r="46" fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
+  <rect x="66" y="106" width="20" height="20" rx="5" fill="#0f0f0f" stroke="#232323" stroke-width="1.5"/>
+  <!-- Hood -->
+  <path d="M 76 19
+           C 49 19 31 39 30 65
+           C 29 92 44 113 76 115
+           C 108 113 123 92 122 65
+           C 121 39 103 19 76 19 Z"
+        fill="#111" stroke="#1e1e1e" stroke-width="1.5"/>
+  <!-- Single cloth fold above the band -->
+  <path d="M 58 24 Q 50 36 47 50" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Face mask: lower face fully covered -->
+  <path d="M 36 84 Q 76 96 116 84 L 113 100 Q 76 113 39 100 Z" fill="#0d0d0d" stroke="#1f1f1f" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Mask seam -->
+  <path d="M 46 99 Q 76 108 106 99" stroke="#191919" stroke-width="1.5" fill="none" stroke-linecap="round"/>
 
-  <!-- Blindfold -->
-  <rect x="33" y="57" width="92" height="28" rx="7" fill="url(#bfold)" filter="url(#bglow)"/>
-  <!-- Blindfold highlight -->
-  <rect x="40" y="61" width="52" height="10" rx="5" fill="#fff" opacity="0.14"/>
+  <!-- Blindfold band — over the eyes -->
+  <rect x="26" y="54" width="100" height="27" rx="6.5" fill="url(#bfold)" filter="url(#bglow)"/>
+  <!-- Band highlight -->
+  <rect x="33" y="58" width="56" height="9" rx="4.5" fill="#fff" opacity="0.14"/>
   <!-- Knot -->
-  <ellipse cx="131" cy="71" rx="10" ry="9" fill="#166534"/>
-  <ellipse cx="131" cy="71" rx="6" ry="5" fill="#15803d"/>
-  <!-- Tie tails (right side) -->
-  <path d="M 139 64 C 147 58 155 52 162 47" stroke="#166534" stroke-width="3" stroke-linecap="round" fill="none"/>
-  <path d="M 139 78 C 147 84 155 90 162 95" stroke="#166534" stroke-width="3" stroke-linecap="round" fill="none"/>
-
-  <!-- Nose -->
-  <path d="M 73 82 L 72 94 Q 76 98 80 94 L 79 82" stroke="#252525" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Mouth — slight smile -->
-  <path d="M 60 108 Q 76 120 92 108" stroke="#252525" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <ellipse cx="127" cy="67" rx="9.5" ry="8.5" fill="#166534"/>
+  <ellipse cx="127" cy="67" rx="5.5" ry="5" fill="#15803d"/>
+  <!-- Flowing tails — asymmetric, wind-blown -->
+  <path d="M 133 62 C 143 60 152 55 156 46 C 159 54 152 63 139 67 Z" fill="url(#bfold)"/>
+  <path d="M 133 72 C 142 74 150 81 154 89 C 158 97 162 101 168 104 C 161 103 155 99 151 93 C 146 85 140 79 133 78 Z" fill="#166534"/>
 
   <!-- ── "B.E.Chat" text ───────────────────────── -->
   <text

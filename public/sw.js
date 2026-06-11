@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blind-edge-v10';
+const CACHE_NAME = 'blind-edge-v11';
 const APP_SHELL = [
   '/',
   '/index.html',
