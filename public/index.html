@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- maximum-scale=1 suppresses iOS input-focus auto-zoom; pinch-zoom for
+       accessibility still works in browser tabs (Safari ignores the cap for
+       user gestures). interactive-widget keeps Android from hiding the
+       compose bar behind the keyboard. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0a0a0a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -28,24 +32,42 @@
     }
 
     /* ------------------------------------------------------------------ */
-    /* Root                                                                 */
+    /* Root — bulletproof app shell                                        */
     /* ------------------------------------------------------------------ */
+    html {
+      /* stop mobile browsers from inflating text on rotate/zoom */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      overscroll-behavior: none;
+    }
+
+    img, svg, canvas, video { max-width: 100%; }
+
     body {
       background: #0a0a0a;
       color: #e8e8e8;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 14px;
+      /* fixed shell: the document itself can never scroll, bounce, or be
+         panned while pinch-zoomed — all scrolling happens inside panels */
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100vh;   /* fallback for older WebKit */
       height: 100dvh;
       display: flex;
       align-items: flex-start;
       justify-content: center;
       overflow: hidden;
+      overscroll-behavior: none;
+      /* removes double-tap-to-zoom (and its 300ms delay) on the whole UI */
+      touch-action: manipulation;
     }
 
     #app {
       width: 100%;
       max-width: 440px;
-      height: 100dvh;
+      height: 100%;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -159,7 +181,9 @@
       color: #e8e8e8;
       padding: 10px 12px;
       font-family: inherit;
-      font-size: 14px;
+      /* 16px is iOS Safari's threshold: anything smaller makes the browser
+         auto-zoom the page on focus and leave it scaled. Never go below. */
+      font-size: 16px;
       outline: none;
       margin-bottom: 12px;
       transition: border-color 0.15s;
@@ -234,6 +258,16 @@
       padding: 9px 16px;
       transition: opacity 0.15s, background 0.15s;
       -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* app chrome shouldn't be text-selectable on long-press; message
+       bubbles and key/address boxes stay copyable */
+    #app-header, .panel-header, .tab-row, .ttl-grid, .auth-links, .feature-pills {
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     button:disabled {
@@ -407,6 +441,8 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      /* inner scroll never chains out to the (fixed) document */
+      overscroll-behavior: contain;
     }
 
     .panel.hidden {
@@ -651,8 +687,8 @@
 
     .request-name {
       margin-bottom: 0 !important;
-      padding: 6px 10px !important;
-      font-size: 13px !important;
+      padding: 5px 10px !important;
+      /* stays at the global 16px — smaller would trigger iOS focus zoom */
     }
 
     .btn-accept-request {
@@ -711,6 +747,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      overscroll-behavior: contain;
     }
 
     .message {
@@ -836,8 +873,10 @@
       padding: 24px;
       width: 100%;
       max-width: 380px;
-      max-height: 90dvh;
+      max-height: 85vh;   /* fallback */
+      max-height: 85dvh;
       overflow-y: auto;
+      overscroll-behavior: contain;
     }
 
     .modal-title {
@@ -1946,7 +1985,7 @@
             autocorrect="off"
             autocapitalize="off"
             spellcheck="false"
-            style="font-family:'JetBrains Mono',monospace;font-size:13px;resize:none"
+            style="font-family:'JetBrains Mono',monospace;font-size:16px;resize:none"
           ></textarea>
 
           <input

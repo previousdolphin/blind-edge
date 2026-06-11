@@ -476,7 +476,7 @@ async function openChat(contactId) {
   await state.storage.markRead(contactId);
   await renderMessages();
   scrollToBottom();
-  $id('compose-input').focus();
+  focusComposeIfDesktop();
 }
 
 function goBack() {
@@ -511,7 +511,7 @@ async function openGroupChat(groupId) {
   await state.storage.markGroupRead(groupId);
   await renderGroupMessages();
   scrollToBottom();
-  $id('compose-input').focus();
+  focusComposeIfDesktop();
 }
 
 async function renderGroupMessages() {
@@ -545,6 +545,15 @@ async function renderMessages() {
 function scrollToBottom() {
   const list = $id('message-list');
   list.scrollTop = list.scrollHeight;
+}
+
+// Auto-focusing the compose box is nice with a keyboard, hostile on a phone
+// (it pops the on-screen keyboard and shoves the layout around on every chat
+// open). Touch devices get focus only when the user taps the box themselves.
+function focusComposeIfDesktop() {
+  if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    $id('compose-input').focus();
+  }
 }
 
 async function sendGroupMessage() {
