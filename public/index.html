@@ -77,8 +77,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
       background: #0a0a0a;
+      overflow-y: auto;
     }
 
     .auth-card {
@@ -336,8 +337,10 @@
     #app-header {
       display: flex;
       align-items: center;
-      padding: 0 12px;
-      height: 48px;
+      /* installed PWAs draw under the iOS status bar (black-translucent) —
+         push the header content below it */
+      padding: env(safe-area-inset-top, 0px) 12px 0;
+      height: calc(48px + env(safe-area-inset-top, 0px));
       border-bottom: 1px solid #1a1a1a;
       flex-shrink: 0;
       gap: 8px;
@@ -816,7 +819,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
       z-index: 100;
       backdrop-filter: blur(2px);
       -webkit-backdrop-filter: blur(2px);
@@ -913,7 +916,7 @@
     /* ------------------------------------------------------------------ */
     #toast-container {
       position: fixed;
-      bottom: 24px;
+      bottom: calc(24px + env(safe-area-inset-bottom, 0px));
       right: 24px;
       display: flex;
       flex-direction: column;
