@@ -5,7 +5,7 @@
 > End-to-end encrypted, local-first messaging with a zero-knowledge relay.
 > No accounts. No plaintext on the wire. Deployable in under 5 minutes.
 
-**Built entirely with [Claude Code](https://claude.ai/code)** as a live demonstration of AI-assisted full-stack development — and of a simple idea: a messenger where **everything lives on your device** and the server is a blind mailbox anyone can run.
+**Built entirely with [Claude Code](https://claude.ai/code)** (originally Opus, and then revised with Fable 5) as a live demonstration of AI-assisted full-stack development — and of a simple idea: a messenger where **everything lives on your device** and the server is a blind mailbox anyone can run.
 
 **Try it now:** [blind-edge.pages.dev](https://blind-edge.pages.dev) — works immediately with the shared demo relay. No sign-up, no email, no phone number.
 
